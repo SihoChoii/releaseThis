@@ -1,0 +1,12 @@
+{
+  "name": "releasethis",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "tui": "bun script/tui/index.js",
+    "tui:demo": "bun script/tui/index.js --demo",
+    "test": "bun test script/tui",
+    "test:tui": "bun test script/tui"
+  },
+  "engines": { "bun": ">=1.3.0" }
+}
