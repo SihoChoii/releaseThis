@@ -390,9 +390,10 @@ describe('frame budget', () => {
     expect(marks).toBe(1);
     expect(clock.tick(1_000)).toBe(true);
     const heartbeat = a.runner.statusSlot.heartbeatAt;
+    a.runner.statusSlot.heartbeatAt = heartbeat - 16_000;
     a.runner.status({ phase: 'Notarizing', detail: 'Waiting for Apple', progress: 0.2 });
     expect(marks).toBe(1);
-    expect(a.runner.statusSlot.heartbeatAt).toBe(heartbeat);
+    expect(a.runner.statusSlot.heartbeatAt).toBeGreaterThanOrEqual(heartbeat);
     expect(clock.tick(1_000)).toBe(false);
     a.runner.status({ phase: 'Stapling' });
     expect(a.runner.statusSlot).toMatchObject({ phase: 'Stapling', detail: null, progress: null, completed: null, total: null });
@@ -514,9 +515,10 @@ printf '%s\\n' '::status phase=FromErr detail="Waiting for Apple"' >&2
     expect(r.statusSlot.phase).toHaveLength(40);
     expect(r.statusSlot.detail).toHaveLength(120);
     const heartbeat = r.statusSlot.heartbeatAt;
+    r.statusSlot.heartbeatAt = heartbeat - 16_000;
     r.status({ phase: 'p'.repeat(80), detail: 'd'.repeat(200) });
     expect(marks).toBe(1);
-    expect(r.statusSlot.heartbeatAt).toBe(heartbeat);
+    expect(r.statusSlot.heartbeatAt).toBeGreaterThanOrEqual(heartbeat);
   });
 
   test('a progress fraction draws a bar on the running row and in the footer', () => {
@@ -569,6 +571,94 @@ printf '%s\\n' '::status phase=FromErr detail="Waiting for Apple"' >&2
     expect(screen).toContain('━');
   });
 
+  test('an identical sentinel refreshes the heartbeat without dirtying the frame', () => {
+    const a = running();
+    const paints = [];
+    const clock = createFrameClock({ paint: kind => paints.push(kind), isRunning: () => true, motion: () => false });
+    let marks = 0;
+    a.runner.onChange = reason => { marks++; clock.mark(reason); };
+    const realNow = Date.now;
+    Date.now = () => now;
+    try {
+      a.runner.ingestChildLine('::status phase=Notarizing detail="Waiting for Apple"');
+      expect(marks).toBe(1);
+      expect(clock.tick(now)).toBe(true);
+      const aged = render(a, 110, 34, { color: false, now: now + 16_000 }).join('\n');
+      expect(aged).toContain('Still working · last update 16s ago');
+
+      Date.now = () => now + 16_000;
+      a.runner.ingestChildLine('::status phase=Notarizing detail="Waiting for Apple"');
+      expect(marks).toBe(1);
+      expect(a.runner.statusSlot.heartbeatAt).toBe(now + 16_000);
+      expect(clock.tick(now)).toBe(false);
+      const fresh = render(a, 110, 34, { color: false, now: now + 16_000 }).join('\n');
+      expect(fresh).toContain('Notarizing');
+      expect(fresh).toContain('Waiting for Apple');
+      expect(fresh).not.toContain('last update 16s ago');
+      expect(fresh).not.toContain('Still working');
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
+  test('normalizes status text onto one row before clipping and dedupe', () => {
+    const a = running();
+    let marks = 0;
+    a.runner.onChange = reason => { if (reason === 'status') marks++; };
+    a.runner.status({ phase: 'Compile\nBROKEN', detail: 'one\rtwo' });
+    expect(marks).toBe(1);
+    expect(a.runner.statusSlot.phase).toBe('Compile BROKEN');
+    expect(a.runner.statusSlot.detail).toBe('one two');
+    const rows = render(a, 110, 34, { color: false, now });
+    expect(rows).toHaveLength(34);
+    expect(rows.join('\n').split('\n')).toHaveLength(34);
+    const text = rows.join('\n');
+    expect(text).toContain('Compile BROKEN');
+    expect(text).toContain('one two');
+    expect(text).not.toContain('\r');
+    expect(text).not.toContain('\t');
+    expect(text).not.toContain('\x1b');
+
+    a.runner.statusSlot.heartbeatAt = 1;
+    a.runner.status({ phase: 'Compile\rBROKEN\x1b[0m', detail: 'one\ttwo\x1b]52;c;secret\x07' });
+    expect(marks).toBe(1);
+    expect(a.runner.statusSlot.heartbeatAt).toBeGreaterThan(1);
+    expect(a.runner.statusSlot.phase).toBe('Compile BROKEN');
+    expect(a.runner.statusSlot.detail).toBe('one two');
+
+    a.runner.status({ phase: 'Compile\tOK', detail: 'see \x1b[31mred\x1b[0m\x1b]52;c;secret\x07 now' });
+    expect(marks).toBe(2);
+    expect(a.runner.statusSlot.phase).toBe('Compile OK');
+    expect(a.runner.statusSlot.detail).toBe('see red now');
+    const controlled = render(a, 110, 34, { color: false, now });
+    expect(controlled).toHaveLength(34);
+    expect(controlled.join('\n').split('\n')).toHaveLength(34);
+    const controlledText = controlled.join('\n');
+    expect(controlledText).toContain('Compile OK');
+    expect(controlledText).toContain('see red now');
+    expect(controlledText).not.toContain('\t');
+    expect(controlledText).not.toContain('\r');
+    expect(controlledText).not.toContain('\x1b');
+    expect(controlledText).not.toContain('secret');
+
+    const r = new Runner({ root: temp, script: 'unused' });
+    let statusMarks = 0;
+    r.onChange = reason => { if (reason === 'status') statusMarks++; };
+    r.status({ phase: 'Compile\n' + 'B'.repeat(50), detail: 'one\r' + 'd'.repeat(140) });
+    const phase = ('Compile ' + 'B'.repeat(50)).slice(0, 40);
+    const detail = ('one ' + 'd'.repeat(140)).slice(0, 120);
+    expect(r.statusSlot.phase).toBe(phase);
+    expect(r.statusSlot.detail).toBe(detail);
+    expect(r.statusSlot.phase).not.toContain('\n');
+    expect(statusMarks).toBe(1);
+    r.statusSlot.heartbeatAt = 1;
+    r.status({ phase: 'Compile\r' + 'B'.repeat(80) + '\x1b[31m', detail: 'one\t' + 'd'.repeat(200) + '\nmore' });
+    expect(statusMarks).toBe(1);
+    expect(r.statusSlot.heartbeatAt).toBeGreaterThan(1);
+    expect(r.statusSlot.phase).toBe(phase);
+    expect(r.statusSlot.detail).toBe(detail);
+  });
+
   test('demo build progress moves through the slot and stays out of the log', async () => {
     const steps = holdthis.tasks.build.demo;
     expect(steps.map(step => step.status.progress)).toEqual([1 / 3, 1 / 3, 2 / 3, 1]);
@@ -582,6 +672,65 @@ printf '%s\\n' '::status phase=FromErr detail="Waiting for Apple"' >&2
     expect(r.logs.some(line => line.text.includes('Link HoldThis'))).toBe(true);
     expect(r.logs.some(line => line.text.includes('::status'))).toBe(false);
     expect(r.statusSlot).toBeNull();
+  });
+});
+
+describe('final status sentinels without a trailing newline', () => {
+  test('parses valid sentinels and logs malformed or ordinary text on stdout and stderr', async () => {
+    const path = await script(`case "$1" in
+valid)
+  printf '%s\\n' 'plain line'
+  printf '%s' '::status phase=Final progress=1'
+  printf '%s' '::status phase=ErrFinal' >&2
+  ;;
+bad)
+  printf '%s' '::status nope=1'
+  printf '%s' '::status detail="no-end' >&2
+  ;;
+text)
+  printf '%s' 'ordinary tail'
+  printf '%s' 'err tail' >&2
+  ;;
+esac
+`);
+    const r = new Runner({ root: temp, script: path });
+    const seen = [];
+    r.onChange = reason => { if (reason === 'status') seen.push({ ...r.statusSlot }); };
+
+    expect(await r.run([{ id: 'valid', label: 'Valid', args: ['valid'] }])).toBe('done');
+    expect(seen.map(slot => slot.phase).sort()).toEqual(['ErrFinal', 'Final']);
+    expect(seen.find(slot => slot.phase === 'Final')).toMatchObject({ progress: 1 });
+    expect(r.statusSlot).toBeNull();
+    let texts = r.logs.map(line => line.text);
+    expect(texts).toContain('plain line');
+    expect(texts.some(text => text.includes('::status') || text.includes('phase=Final') || text.includes('phase=ErrFinal'))).toBe(false);
+
+    seen.length = 0;
+    expect(await r.run([{ id: 'bad', label: 'Bad', args: ['bad'] }])).toBe('done');
+    expect(seen).toEqual([]);
+    texts = r.logs.map(line => line.text);
+    expect(texts).toContain('::status nope=1');
+    expect(texts).toContain('::status detail="no-end');
+
+    expect(await r.run([{ id: 'text', label: 'Text', args: ['text'] }])).toBe('done');
+    texts = r.logs.map(line => line.text);
+    expect(texts).toContain('ordinary tail');
+    expect(texts).toContain('err tail');
+  });
+
+  test('reassembles a valid sentinel split across chunks with no trailing newline', async () => {
+    const path = await script(`printf '%s' '::status phase=Spl'
+sleep 0.2
+printf '%s' 'it progress=1'
+`);
+    const r = new Runner({ root: temp, script: path });
+    const seen = [];
+    r.onChange = reason => { if (reason === 'status') seen.push({ ...r.statusSlot }); };
+    expect(await r.run([{ id: 'split', label: 'Split', args: [] }])).toBe('done');
+    expect(seen.map(slot => slot.phase)).toEqual(['Split']);
+    expect(seen[0].progress).toBe(1);
+    expect(r.statusSlot).toBeNull();
+    expect(r.logs.some(line => line.text.includes('::status') || line.text.includes('phase=Spl') || line.text === 'it progress=1')).toBe(false);
   });
 });
 

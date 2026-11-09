@@ -1,11 +1,20 @@
 import { spawn } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
+import { stripVTControlCharacters } from 'node:util';
 import { cleanOutput } from './terminal.js';
 
 export { cleanOutput };
 export const STALE_AFTER_MS = 15_000;
 
 const STATUS_KEYS = new Set(['phase', 'detail', 'progress', 'completed', 'total']);
+
+// CR/LF/tab become spaces before other controls are stripped, so a carriage return
+// separates words instead of disappearing the way cleanOutput would remove it.
+function normalizeStatusText(value) {
+  if (value == null || value === '') return value;
+  const spaced = String(value).replace(/[\r\n\t]/g, ' ');
+  return stripVTControlCharacters(spaced).replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '');
+}
 
 function clipColumns(value, width) {
   if (value == null || value === '') return null;
@@ -116,19 +125,23 @@ export class Runner {
     this.onChange('log');
   }
 
-  // Latest visible snapshot. Omitted fields clear. An unchanged snapshot does not notify.
+  // Latest visible snapshot. Omitted fields clear. Identical text refreshes the heartbeat and does not notify.
   status(patch) {
     const source = patch ?? {};
     const next = {
-      phase: clipColumns(source.phase, 40),
-      detail: clipColumns(source.detail, 120),
+      phase: clipColumns(normalizeStatusText(source.phase), 40),
+      detail: clipColumns(normalizeStatusText(source.detail), 120),
       progress: finiteProgress(source.progress),
       completed: count(source.completed),
       total: count(source.total),
     };
+    const heartbeatAt = Date.now();
     const slot = this.statusSlot;
-    if (slot && slot.phase === next.phase && slot.detail === next.detail && slot.progress === next.progress && slot.completed === next.completed && slot.total === next.total) return;
-    this.statusSlot = { ...next, heartbeatAt: Date.now() };
+    if (slot && slot.phase === next.phase && slot.detail === next.detail && slot.progress === next.progress && slot.completed === next.completed && slot.total === next.total) {
+      slot.heartbeatAt = heartbeatAt;
+      return;
+    }
+    this.statusSlot = { ...next, heartbeatAt };
     this.onChange('status');
   }
 
@@ -203,7 +216,7 @@ export class Runner {
           if (buffer.length > 8000) { this.log(buffer.slice(0, 4000)); buffer = buffer.slice(-4000); }
         };
         stream.on('data', chunk => consume(decoder.write(chunk)));
-        stream.on('end', () => { consume(decoder.end()); if (buffer) this.log(buffer); });
+        stream.on('end', () => { consume(decoder.end()); if (buffer) this.ingestChildLine(buffer); });
       }
       child.on('error', error => this.log(error.message, 'error'));
       child.on('close', async (code, signal) => {
