@@ -133,6 +133,8 @@ export class App {
     if (this.runner.running) return this.notify('Wait for the active task, or cancel it with Ctrl+C.');
     const task = this.profile.catalog[this.selection];
     if (!this.facts) return this.notify('Workspace is not ready. Press R to retry.');
+    const skipped = task.skip?.(this.mode()) || '';
+    if (skipped) return this.notify(skipped);
     const blocked = task.requires?.(this.context()) || '';
     if (blocked) return this.notify(blocked);
     const job = materialize(task, this.context());

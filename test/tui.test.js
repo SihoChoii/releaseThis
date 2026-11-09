@@ -595,3 +595,59 @@ describe('cockpit boundary', () => {
     }
   });
 });
+
+describe('single-step skip declarations', () => {
+  const skipMessage = 'disabled for this mode';
+  function profile() {
+    const task = { ...holdthis.catalog[0], skip: () => skipMessage, requires: () => '' };
+    return {
+      ...holdthis,
+      catalog: [task, ...holdthis.catalog.slice(1)],
+      tasks: { ...holdthis.tasks, [task.id]: task },
+    };
+  }
+  function skippedApp() {
+    const a = new App({ root: temp, demo: true, profile: profile() });
+    a.workspace = holdthis.demoWorkspace();
+    return a;
+  }
+  function expectSkipped(a) {
+    expect(a.modal).toBeNull();
+    expect(a.notice).toBe(skipMessage);
+    expect(a.runner.running).toBe(false);
+    expect(a.runner.jobs).toEqual([]);
+  }
+
+  test('selectStep reports the skip message and does not start the task', () => {
+    const a = skippedApp();
+    a.selection = 0;
+    a.selectStep();
+    expectSkipped(a);
+  });
+
+  test('the command palette step entry honors the same skip', () => {
+    const a = skippedApp();
+    a.key('/', {});
+    a.key('Step: Build', {});
+    a.key('', key('return'));
+    expectSkipped(a);
+  });
+
+  test('a ready task still opens a confirmation', () => {
+    const a = skippedApp();
+    const task = a.profile.catalog[1];
+    a.selection = 1;
+    a.selectStep();
+    expect(a.modal?.type).toBe('confirm');
+    expect(a.modal.title).toBe(task.label);
+    expect(a.runner.running).toBe(false);
+  });
+
+  test('the step screen shows the skip message before the runnable hint', () => {
+    const a = skippedApp();
+    a.showSteps();
+    const screen = render(a, 80, 32, { color: false }).join('\n');
+    expect(screen).toContain(skipMessage);
+    expect(screen).not.toContain('Enter to review this step');
+  });
+});

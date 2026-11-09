@@ -102,7 +102,8 @@ function steps(app, width, height, c, frame, now) {
   });
   if (height >= 14) {
     const task = catalog[app.selection];
-    const blocked = app.facts ? task.requires?.(app.context()) || '' : 'Reading workspace…';
+    const skipped = task.skip?.(app.mode()) || '';
+    const blocked = skipped || (app.facts ? task.requires?.(app.context()) || '' : 'Reading workspace…');
     lines.push('', ...wrap(blocked || task.detail, width - 4).map(line => ' ' + c(line, blocked ? 'amber' : 'ice')));
     if (height >= 20) lines.push(' ' + c(blocked ? copy.stepsBlocked : copy.stepsReady, 'muted'));
   }
