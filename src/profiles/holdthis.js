@@ -48,6 +48,16 @@ function suggested(facts) {
     : { version: source.version, build: source.build };
 }
 
+function applyProduced(facts, id, keys) {
+  for (const key of keys) {
+    const fact = facts.get(key);
+    const desc = artifacts.find(item => item.key === key);
+    fact.state = desc.kind === 'checksum' ? 'verified' : 'present';
+    fact.provenance = { source: 'task', id };
+    if (desc.demoSize) fact.size = desc.demoSize;
+  }
+}
+
 function stage(id, label, detail, extra = {}) {
   return {
     id, label, detail,
@@ -70,6 +80,7 @@ const build = stage('build', 'Build app', 'Compile Swift and stage the app bundl
     step('[2/3] Link HoldThis', { phase: 'Link', progress: 2 / 3, completed: 2, total: 3 }),
     step('[3/3] Stage resources and app icon', { phase: 'Stage', progress: 1, completed: 3, total: 3 }),
   ],
+  applyDemo(facts) { applyProduced(facts, 'build', ['artifact.app.built']); },
 });
 
 const sign = stage('sign', 'Sign app', 'Developer ID and hardened runtime', {
@@ -89,6 +100,7 @@ const sign = stage('sign', 'Sign app', 'Developer ID and hardened runtime', {
     stapled.value = false;
     stapled.state = 'missing';
     stapled.provenance = { source: 'task', id: 'sign' };
+    applyProduced(facts, 'sign', ['artifact.app.signed']);
   },
 });
 
@@ -123,6 +135,7 @@ const zip = stage('zip', 'Updater archive', 'Package and verify the update ZIP',
     step('Creating updater ZIP', { phase: 'Packaging' }),
     step('Verifying archive and app signature', { phase: 'Verifying' }),
   ],
+  applyDemo(facts) { applyProduced(facts, 'zip', ['artifact.update.zip']); },
 });
 
 const dmg = stage('dmg', 'Installer image', 'Create the illustrated installer DMG', {
@@ -132,6 +145,7 @@ const dmg = stage('dmg', 'Installer image', 'Create the illustrated installer DM
     step('Composing illustrated installer', { phase: 'Packaging' }),
     step('Signing and notarizing disk image', { phase: 'Signing' }),
   ],
+  applyDemo(facts) { applyProduced(facts, 'dmg', ['artifact.installer.dmg']); },
 });
 
 const checksums = stage('checksums', 'Verify checksums', 'Write SHA-256 for both archives', {
@@ -142,6 +156,7 @@ const checksums = stage('checksums', 'Verify checksums', 'Write SHA-256 for both
     step('SHA-256: updater ZIP verified', { phase: 'Verifying' }),
     step('SHA-256: installer DMG verified', { phase: 'Verifying' }),
   ],
+  applyDemo(facts) { applyProduced(facts, 'checksums', ['artifact.update.zip.sha256', 'artifact.installer.dmg.sha256']); },
   onDone(ctx) {
     return ctx.mode.signedOnly
       ? 'Signed archives created. Enable notarization for a public release.'

@@ -804,3 +804,130 @@ describe('parameter schema form', () => {
     expect(a.modal.serial).toBe('94');
   });
 });
+
+describe('demo produced artifact facts', () => {
+  function releaseJobs(a) {
+    return resolvePlan(holdthis.plans.release, a.context({ version: '1.0.3', build: '4' }));
+  }
+  function clearArtifacts(a) {
+    for (const fact of a.facts.all()) if (fact.role === 'artifact') fact.state = 'missing';
+  }
+
+  test('a full simulated release writes artifact facts and keeps them across refresh', async () => {
+    const a = app();
+    a.runner.demoPace = 0;
+    clearArtifacts(a);
+    await a.start(releaseJobs(a));
+    expect(a.runner.result).toBe('done');
+    expect(a.facts.get('artifact.app.built')).toMatchObject({ state: 'present', provenance: { source: 'task', id: 'build' } });
+    expect(a.facts.get('artifact.app.signed')).toMatchObject({ state: 'present', provenance: { source: 'task', id: 'sign' } });
+    expect(a.facts.get('artifact.update.zip')).toMatchObject({ state: 'present', size: '7.9 MB', provenance: { source: 'task', id: 'zip' } });
+    expect(a.facts.get('artifact.installer.dmg')).toMatchObject({ state: 'present', size: '12.4 MB', provenance: { source: 'task', id: 'dmg' } });
+    expect(a.facts.get('artifact.update.zip.sha256')).toMatchObject({ state: 'verified', provenance: { source: 'task', id: 'checksums' } });
+    expect(a.facts.get('artifact.installer.dmg.sha256')).toMatchObject({ state: 'verified', provenance: { source: 'task', id: 'checksums' } });
+    expect(a.facts.get('version.built').value).toEqual({ version: '1.0.3', build: '4' });
+    await a.refresh();
+    expect(a.facts.get('artifact.app.built').state).toBe('present');
+    expect(a.facts.get('artifact.update.zip.sha256').state).toBe('verified');
+    expect(planBlock(holdthis.plans.publish, a.context())).toBe('');
+  });
+
+  test('a simulated build alone unblocks signing', async () => {
+    const a = app();
+    a.runner.demoPace = 0;
+    clearArtifacts(a);
+    await a.start(releaseJobs(a).filter(job => job.id === 'build'));
+    expect(a.facts.get('artifact.app.built')).toMatchObject({ state: 'present', provenance: { source: 'task', id: 'build' } });
+    await a.refresh();
+    expect(a.facts.get('artifact.app.built').state).toBe('present');
+    expect(requirement(holdthis.tasks.sign, a.context())).toBe('');
+  });
+
+  test('simulated checksum generation verifies a mismatched checksum', async () => {
+    const a = app();
+    a.runner.demoPace = 0;
+    a.facts.get('artifact.update.zip').state = 'present';
+    a.facts.get('artifact.installer.dmg').state = 'present';
+    a.facts.get('artifact.update.zip.sha256').state = 'mismatch';
+    a.facts.get('artifact.installer.dmg.sha256').state = 'mismatch';
+    await a.start(releaseJobs(a).filter(job => job.id === 'checksums'));
+    expect(a.facts.get('artifact.update.zip.sha256').state).toBe('verified');
+    expect(a.facts.get('artifact.installer.dmg.sha256').state).toBe('verified');
+    await a.refresh();
+    expect(a.facts.get('artifact.update.zip.sha256').state).toBe('verified');
+    expect(a.facts.get('artifact.installer.dmg.sha256').state).toBe('verified');
+  });
+});
+
+describe('bounded log ingestion', () => {
+  function longBurst(a) {
+    for (let i = 0; i < 2500; i++) a.runner.logs.push({ id: i + 1, text: 'x'.repeat(4000), kind: 'output', at: 1 });
+    a.runner.logRevision = 2500;
+  }
+
+  test('a capped burst yields before the backlog is fully wrapped', async () => {
+    const a = app();
+    longBurst(a);
+    let ran = false;
+    await new Promise(resolve => {
+      setTimeout(() => { ran = true; resolve(); }, 0);
+      visibleLogs(a, 80, 10);
+    });
+    expect(ran).toBe(true);
+    expect(a.logCache.lastId).toBeGreaterThan(0);
+    expect(a.logCache.lastId).toBeLessThan(2500);
+    let guard = 0;
+    while (a.logCache.lastId < 2500 && guard++ < 40) visibleLogs(a, 80, 10);
+    expect(a.logCache.lastId).toBe(2500);
+  });
+
+  test('an input paint does not rebuild a cold cache or a changed filter', () => {
+    const a = app();
+    longBurst(a);
+    a.deferLogIngest = true;
+    visibleLogs(a, 80, 10);
+    expect(a.logCache).toBeUndefined();
+    a.deferLogIngest = false;
+    visibleLogs(a, 80, 10);
+    const rows = a.logCache.rows.length;
+    const lastId = a.logCache.lastId;
+    a.deferLogIngest = true;
+    a.logFilter = 'zzzz-no-match';
+    visibleLogs(a, 80, 10);
+    expect(a.logCache.filter).toBe('');
+    expect(a.logCache.rows.length).toBe(rows);
+    expect(a.logCache.lastId).toBe(lastId);
+  });
+
+  test('returning to Logs catches up after the task is idle', () => {
+    const a = app();
+    const paints = [];
+    const clock = createFrameClock({
+      paint(kind) {
+        paints.push(kind);
+        a.deferLogIngest = kind === 'input';
+        try { render(a, 110, 34, { color: false }); }
+        finally { a.deferLogIngest = false; }
+      },
+      isRunning: () => a.runner.running,
+      motion: () => false,
+    });
+    a.onChange = reason => clock.mark(reason || 'chrome');
+    a.tab = 2;
+    a.runner.log('first');
+    expect(clock.tick(10_000)).toBe(true);
+    expect(a.logCache.rows.some(row => row.text === 'first')).toBe(true);
+    a.tab = 0;
+    a.runner.log('final error', 'error');
+    expect(clock.tick(11_000)).toBe(true);
+    expect(a.logCache.rows.some(row => row.text === 'final error')).toBe(false);
+    a.runner.running = false;
+    paints.length = 0;
+    a.key('l', {});
+    clock.input();
+    expect(paints).toEqual(['input']);
+    expect(a.logCache.rows.some(row => row.text === 'final error')).toBe(false);
+    expect(clock.tick(12_000)).toBe(true);
+    expect(render(a, 110, 34, { color: false }).join('\n')).toContain('final error');
+  });
+});

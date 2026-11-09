@@ -4,19 +4,37 @@ import { duration } from './format.js';
 // Append newly arrived lines to the wrap cache. A paused viewport keeps its anchor
 // when the buffer grows or the 2,500-line cap drops older rows. An input paint sets
 // deferLogIngest so a keypress does not wrap that backlog; the frame tick ingests it.
+// Wrapping is budgeted so a burst of long lines yields back to input between batches.
+const WRAP_BUDGET = 8000;
 const matches = (item, filter) => !filter || item.text.toLowerCase().includes(filter.toLowerCase());
 
-function appendWrapped(rows, item, width) {
-  wrap(item.text, width - 10).forEach((text, i) => rows.push({ ...item, text, rowId: `${item.id}:${i}`, continuation: i > 0 }));
+function scheduleCatchUp(app) {
+  if (app.logCatchUp) return;
+  app.logCatchUp = setTimeout(() => {
+    app.logCatchUp = null;
+    app.onChange?.('log');
+  }, 0);
 }
 
-function rebuildLogs(app, width) {
+function appendWrapped(rows, item, width, budget) {
+  const lines = wrap(item.text, width - 10);
+  if (lines.length > budget.left) return false;
+  lines.forEach((text, i) => rows.push({ ...item, text, rowId: `${item.id}:${i}`, continuation: i > 0 }));
+  budget.left -= lines.length;
+  return true;
+}
+
+function rebuildLogs(app, width, budget) {
   const rows = [];
-  for (const item of app.runner.logs) if (matches(item, app.logFilter)) appendWrapped(rows, item, width);
-  return { rows, width, filter: app.logFilter, lastId: app.runner.logs.at(-1)?.id ?? 0 };
+  let lastId = 0;
+  for (const item of app.runner.logs) {
+    if (matches(item, app.logFilter) && !appendWrapped(rows, item, width, budget)) break;
+    lastId = item.id;
+  }
+  return { rows, width, filter: app.logFilter, lastId };
 }
 
-function ingestLogs(app, width) {
+function ingestLogs(app, width, budget) {
   const cache = app.logCache, logs = app.runner.logs, firstId = logs[0]?.id ?? Infinity;
   let dropped = 0;
   while (dropped < cache.rows.length && cache.rows[dropped].id < firstId) dropped++;
@@ -26,10 +44,9 @@ function ingestLogs(app, width) {
   let appended = false;
   for (let i = start; i < logs.length; i++) {
     const item = logs[i];
+    if (matches(item, cache.filter) && !appendWrapped(cache.rows, item, width, budget)) break;
     cache.lastId = item.id;
-    if (!matches(item, cache.filter)) continue;
-    appendWrapped(cache.rows, item, width);
-    appended = true;
+    if (matches(item, cache.filter)) appended = true;
   }
   if ((dropped || appended) && app.scroll > 0 && app.logAnchor) {
     const index = cache.rows.findIndex(row => row.rowId === app.logAnchor);
@@ -37,11 +54,25 @@ function ingestLogs(app, width) {
   }
 }
 
+function cacheBehind(app, width) {
+  const cache = app.logCache;
+  const lastId = app.runner.logs.at(-1)?.id ?? 0;
+  return !cache || cache.width !== width || cache.filter !== app.logFilter || cache.lastId < lastId;
+}
+
 export function visibleLogs(app, width, count) {
   const cache = app.logCache;
-  if (!cache || cache.width !== width || cache.filter !== app.logFilter) app.logCache = rebuildLogs(app, width);
-  else if (!app.deferLogIngest) ingestLogs(app, width);
-  const rows = app.logCache.rows;
+  const lastId = app.runner.logs.at(-1)?.id ?? 0;
+  if (app.deferLogIngest) {
+    if (cacheBehind(app, width)) app.onChange?.('log');
+  } else if (!cache || cache.width !== width || cache.filter !== app.logFilter) {
+    app.logCache = rebuildLogs(app, width, { left: WRAP_BUDGET });
+    if (lastId > app.logCache.lastId) scheduleCatchUp(app);
+  } else if (lastId > cache.lastId) {
+    ingestLogs(app, width, { left: WRAP_BUDGET });
+    if (lastId > app.logCache.lastId) scheduleCatchUp(app);
+  }
+  const rows = app.logCache?.rows ?? [];
   app.scroll = Math.min(app.scroll, Math.max(0, rows.length - count));
   const end = rows.length - app.scroll;
   app.logAnchor = rows[end - 1]?.rowId;
