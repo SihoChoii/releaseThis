@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { prettyBytes } from '../tui/format.js';
 
 const exec = promisify(execFile);
 export const STAGES = [
@@ -27,11 +28,6 @@ export const validBuild = v => /^[1-9]\d*$/.test(v);
 export const sameVersion = (a, b) => !!a && !!b && a.version === b.version && a.build === b.build;
 export const nextPatch = v => v.replace(/\d+$/, n => String(BigInt(n) + 1n));
 export const nextBuild = b => String(BigInt(b) + 1n);
-export const prettyBytes = n => n < 1024 ? `${n} B` : n < 1024 ** 2 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 ** 2).toFixed(1)} MB`;
-export const duration = ms => {
-  const sec = Math.max(0, Math.floor(ms / 1000));
-  return sec < 60 ? `${sec}s` : `${Math.floor(sec / 60)}m ${String(sec % 60).padStart(2, '0')}s`;
-};
 
 async function plistVersion(path, env) {
   const buddy = env.HOLDTHIS_PLIST_BUDDY || '/usr/libexec/PlistBuddy';

@@ -1,8 +1,9 @@
-import { STAGES, duration, sameVersion, stepBlock, publishBlock } from './model.js';
-import { painter, fit, box, wrap, plain, bar, spinner, splitLine } from './terminal.js';
+import { STAGES, sameVersion, stepBlock, publishBlock } from './model.js';
+import { duration } from '../tui/format.js';
+import { painter, fit, box, wrap, plain, bar, spinner, splitLine } from '../tui/terminal.js';
 import { dialog } from './dialogs.js';
-import { logLines } from './logs.js';
-export { fit, painter, palette, bar, spinner } from './terminal.js';
+import { logLines } from '../tui/logs.js';
+export { fit, painter, palette, bar, spinner } from '../tui/terminal.js';
 
 const version = v => v ? `${v.version} (${v.build})` : 'Not built';
 const stamp = time => time ? new Date(time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
@@ -112,14 +113,16 @@ function output(app, width, height, c) {
 }
 export function render(app, columns, rows, { color = true, now = Date.now() } = {}) {
   const c = painter(color), width = Math.max(1, columns - 1);
-  if (columns < 58 || rows < 20) return [c('HoldThis / release cockpit', 'amber', true), '', 'Resize to at least 58 columns × 20 rows.', `${columns} × ${rows} now. Q or Ctrl+C to quit.`].slice(0, rows).map(l => fit(l, width));
+  if (columns < 58 || rows < 20) return [c('releaseThis / release cockpit', 'amber', true), '', 'Resize to at least 58 columns × 20 rows.', `${columns} × ${rows} now. Q or Ctrl+C to quit.`].slice(0, rows).map(l => fit(l, width));
   const frame = Math.floor(now / 90), r = app.runner;
   const live = r.jobs.find(j => j.status === 'running'), done = r.jobs.filter(j => j.status === 'done').length;
   const wide = columns >= 100, sideWidth = 30, mainWidth = wide ? width - sideWidth - 2 : width;
   const height = rows - 9;
-  const topRight = app.demo ? c(' DEMO · simulated ', 'amber') : c(' local release ', 'muted');
+  const repoLabel = app.repo || 'repo unknown';
+  const modeLabel = app.demo ? 'DEMO · simulated' : 'local release';
+  const topRight = c(` ${repoLabel} · ${modeLabel} `, app.demo ? 'amber' : 'muted');
   let lines = [
-    splitLine(' ' + c('▗▖ ▗▖', 'amber') + '  ' + c('HoldThis', 'ink', true) + c(' / release cockpit', 'muted'), topRight, width),
+    splitLine(' ' + c('▗▖ ▗▖', 'amber') + '  ' + c('releaseThis', 'ink', true) + c(' / release cockpit', 'muted'), topRight, width),
     ' ' + c('▐▙▄▟▌', 'amber') + '  ' + c('Apple Silicon', 'muted') + c('  /  ', 'line') + c(app.signedOnly ? 'signed only' : 'notarize & staple', app.signedOnly ? 'amber' : 'mint'), '',
     splitLine(' ' + ['Workspace', 'Artifacts', 'Logs'].map((label, i) => c(`${i === app.tab ? '●' : '·'} ${label}  `, i === app.tab ? 'amber' : 'muted', i === app.tab)).join(''), c('/ commands  ? help ', 'muted'), width),
   ];

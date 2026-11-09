@@ -1,13 +1,12 @@
 import { spawn } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
-import { stripVTControlCharacters } from 'node:util';
+import { cleanOutput } from './terminal.js';
 
-// Tool output must never be interpreted as cursor or clipboard commands.
-export const cleanOutput = text => stripVTControlCharacters(text).replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '');
+export { cleanOutput };
 
 export class Runner {
-  constructor({ root, script, onChange = () => {}, demo = false, env = process.env }) {
-    Object.assign(this, { root, script, onChange, demo, env });
+  constructor({ root, script, onChange = () => {}, demo = false, repo = null, env = process.env }) {
+    Object.assign(this, { root, script, onChange, demo, repo, env });
     this.logs = [];
     this.jobs = [];
     this.running = false;
@@ -15,6 +14,7 @@ export class Runner {
     this.child = null;
     this.result = null;
     this.logRevision = 0;
+    this.statusSlot = null;
   }
 
   log(text, kind = 'output') {
@@ -22,7 +22,23 @@ export class Runner {
       this.logs.push({ id: ++this.logRevision, text: line.slice(0, 4000), kind, at: Date.now(), runStartedAt: this.startedAt });
     }
     if (this.logs.length > 2500) this.logs.splice(0, this.logs.length - 2500);
-    this.onChange();
+    this.onChange('log');
+  }
+
+  // Latest visible snapshot. Omitted fields clear. An unchanged snapshot does not notify.
+  status(patch) {
+    const source = patch ?? {};
+    const next = {
+      phase: source.phase ?? null,
+      detail: source.detail ?? null,
+      progress: source.progress ?? null,
+      completed: source.completed ?? null,
+      total: source.total ?? null,
+    };
+    const slot = this.statusSlot;
+    if (slot && slot.phase === next.phase && slot.detail === next.detail && slot.progress === next.progress && slot.completed === next.completed && slot.total === next.total) return;
+    this.statusSlot = { ...next, heartbeatAt: Date.now() };
+    this.onChange('status');
   }
 
   async run(jobs, { completed = [] } = {}) {
@@ -34,7 +50,7 @@ export class Runner {
     this.startedAt = Date.now();
     this.endedAt = null;
     this.log(this.demo ? 'Demo session · release actions are simulated.' : 'Starting release task.', 'notice');
-    this.onChange();
+    this.onChange('chrome');
     try {
       for (const job of this.jobs) {
         if (job.status === 'done') continue;
@@ -45,7 +61,7 @@ export class Runner {
         const code = this.demo ? await this.simulate(job) : await this.execute(job);
         job.endedAt = Date.now();
         job.status = this.cancelled ? 'cancelled' : code === 0 ? 'done' : 'failed';
-        this.onChange();
+        this.onChange('chrome');
         if (code !== 0 || this.cancelled) {
           this.result = this.cancelled ? 'cancelled' : 'failed';
           this.log(this.cancelled ? 'Task cancelled. Completed steps remain on disk.' : `${job.label} exited with code ${code}. Fix the error above, then rerun this step.`, 'error');
@@ -64,7 +80,7 @@ export class Runner {
     } finally {
       this.running = false;
       this.endedAt = Date.now();
-      this.onChange();
+      this.onChange('chrome');
     }
   }
 
@@ -112,7 +128,7 @@ export class Runner {
         kill('SIGKILL');
       })();
     }
-    this.onChange();
+    this.onChange('chrome');
   }
 
   async simulate(job) {
@@ -123,7 +139,7 @@ export class Runner {
       zip: ['Creating updater ZIP', 'Verifying archive and app signature'],
       dmg: ['Composing illustrated installer', 'Signing and notarizing disk image'],
       checksums: ['SHA-256: updater ZIP verified', 'SHA-256: installer DMG verified'],
-      preflight: [`Tag: ${this.demoTag || 'v1.0.2+3'}`, `Repo: ${this.env.HOLDTHIS_RELEASE_REPO || 'SihoChoii/HoldThis-Releases'}`, 'Files: installer DMG, updater ZIP, two SHA-256 files'],
+      preflight: [`Tag: ${this.demoTag || 'v1.0.2+3'}`, `Repo: ${this.repo || 'repo unknown'}`, 'Files: installer DMG, updater ZIP, two SHA-256 files'],
       publish: ['Simulating GitHub upload', 'Simulating release digest verification'],
     };
     for (const text of messages[job.id] || ['Version updated (simulation)']) {

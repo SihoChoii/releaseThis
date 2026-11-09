@@ -3,13 +3,15 @@ import { mkdtemp, writeFile, readFile, rm, chmod } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { App } from './app.js';
-import { Runner, cleanOutput } from './runner.js';
-import { checksumOK, demoWorkspace, planRelease, releaseDefaults, stepBlock, publishBlock } from './model.js';
-import { render, fit } from './view.js';
+import { App } from '../src/release/app.js';
+import { Runner, cleanOutput } from '../src/tui/runner.js';
+import { createFrameClock } from '../src/tui/frame.js';
+import { visibleLogs } from '../src/tui/logs.js';
+import { checksumOK, demoWorkspace, planRelease, releaseDefaults, stepBlock, publishBlock } from '../src/release/model.js';
+import { render, fit } from '../src/release/view.js';
 
 let temp;
-beforeEach(async () => { temp = await mkdtemp(join(tmpdir(), 'holdthis-tui-')); });
+beforeEach(async () => { temp = await mkdtemp(join(tmpdir(), 'releasethis-tui-')); });
 afterEach(async () => { await rm(temp, { recursive: true, force: true }); });
 const key = name => ({ name });
 const app = () => { const a = new App({ root: temp, demo: true }); a.workspace = demoWorkspace(); return a; };
@@ -112,6 +114,7 @@ describe('keyboard and review flows', () => {
     a.modal = null; a.preflightReady = true; a.publish();
     expect(a.modal.title).toBe('Publish to GitHub');
     expect(a.modal.lines.join(' ')).toContain('v1.0.2+3');
+    expect(a.modal.lines.join(' ')).toContain('repo unknown');
     expect(a.modal.choice).toBe(0);
   });
   test('active tasks lock release actions and release mode', () => {
@@ -284,7 +287,7 @@ describe('polished workspace flows', () => {
 
 describe('log reading', () => {
   test('new output preserves the paused viewport and End resumes following', async () => {
-    const { visibleLogs } = await import('./logs.js');
+    const { visibleLogs } = await import('../src/tui/logs.js');
     const a = app();
     for (let i = 0; i < 30; i++) a.runner.log(`line ${i}`);
     a.tab = 2; a.scroll = 10;
@@ -295,12 +298,148 @@ describe('log reading', () => {
     expect(visibleLogs(a, 60, 5).rows.at(-1).text).toBe('more output');
   });
   test('filter returns matching entries with long lines wrapped', async () => {
-    const { visibleLogs } = await import('./logs.js');
+    const { visibleLogs } = await import('../src/tui/logs.js');
     const a = app(); a.runner.log('compile success'); a.runner.log('ERROR ' + 'detail '.repeat(20));
     a.logFilter = 'error';
     const rows = visibleLogs(a, 40, 100).rows;
     expect(rows.length).toBeGreaterThan(1);
     expect(rows.map(r => r.text).join(' ')).not.toContain('compile');
     expect(rows.every(r => Bun.stringWidth(r.text) <= 30)).toBe(true);
+  });
+  test('appends wrapped rows and keeps earlier row objects', () => {
+    const a = app();
+    for (let i = 0; i < 10; i++) a.runner.log(`line ${i}`);
+    visibleLogs(a, 80, 5);
+    const first = a.logCache.rows[0];
+    const count = a.logCache.rows.length;
+    a.runner.log('another line');
+    visibleLogs(a, 80, 5);
+    expect(a.logCache.rows[0]).toBe(first);
+    expect(a.logCache.rows.length).toBe(count + 1);
+    expect(a.logCache.rows.at(-1).text).toBe('another line');
+  });
+  test('rollover drops evicted rows and keeps a paused anchor', () => {
+    const a = app();
+    for (let i = 0; i < 2500; i++) a.runner.log(`line ${i}`);
+    visibleLogs(a, 80, 5);
+    const evicted = a.logCache.rows[0];
+    const survivor = a.logCache.rows.at(-10);
+    a.scroll = a.logCache.rows.length - a.logCache.rows.indexOf(survivor) - 1;
+    visibleLogs(a, 80, 5);
+    expect(a.logAnchor).toBe(survivor.rowId);
+    for (let i = 0; i < 40; i++) a.runner.log(`extra ${i}`);
+    const view = visibleLogs(a, 80, 5);
+    expect(view.rows.at(-1)).toBe(survivor);
+    expect(a.logCache.rows).toContain(survivor);
+    expect(a.logCache.rows).not.toContain(evicted);
+    expect(a.logCache.rows.some(row => row.text === 'line 0')).toBe(false);
+  });
+});
+
+describe('frame budget', () => {
+  function clockFor(a, { running = false, motion = false, paints = [] } = {}) {
+    return createFrameClock({
+      paint(kind) {
+        paints.push(kind);
+        a.deferLogIngest = kind === 'input';
+        try { visibleLogs(a, 80, 5); }
+        finally { a.deferLogIngest = false; }
+      },
+      isRunning: () => running,
+      motion: () => motion,
+    });
+  }
+
+  test('a flood of logs and status patches paints once per frame', () => {
+    const a = app();
+    const paints = [];
+    const clock = clockFor(a, { running: true, paints });
+    a.runner.onChange = reason => clock.mark(reason || 'chrome');
+    a.runner.log('ready');
+    expect(clock.tick(5_000)).toBe(true);
+    paints.length = 0;
+    for (let i = 0; i < 400; i++) {
+      a.runner.log(`line ${i}`);
+      a.runner.status({ phase: 'Linking', progress: i / 400, completed: i, total: 400 });
+    }
+    expect(clock.tick(5_000)).toBe(true);
+    expect(paints).toEqual(['frame']);
+    const { heartbeatAt, ...visible } = a.runner.statusSlot;
+    expect(visible).toEqual({ phase: 'Linking', detail: null, progress: 399 / 400, completed: 399, total: 400 });
+    expect(heartbeatAt).toBeGreaterThan(0);
+    expect(a.logCache.rows.some(row => row.text === 'line 399')).toBe(true);
+    expect(clock.tick(5_039)).toBe(false);
+    expect(paints).toEqual(['frame']);
+  });
+
+  test('an identical status patch does not dirty the frame', () => {
+    const a = app();
+    const paints = [];
+    const clock = clockFor(a, { paints });
+    let marks = 0;
+    a.runner.onChange = reason => { marks++; clock.mark(reason); };
+    a.runner.status({ phase: 'Notarizing', detail: 'Waiting for Apple', progress: 0.2 });
+    expect(marks).toBe(1);
+    expect(clock.tick(1_000)).toBe(true);
+    const heartbeat = a.runner.statusSlot.heartbeatAt;
+    a.runner.status({ phase: 'Notarizing', detail: 'Waiting for Apple', progress: 0.2 });
+    expect(marks).toBe(1);
+    expect(a.runner.statusSlot.heartbeatAt).toBe(heartbeat);
+    expect(clock.tick(1_000)).toBe(false);
+    a.runner.status({ phase: 'Stapling' });
+    expect(a.runner.statusSlot).toMatchObject({ phase: 'Stapling', detail: null, progress: null, completed: null, total: null });
+    expect(marks).toBe(2);
+  });
+
+  test('a keypress paints without flushing pending log lines', () => {
+    const a = app();
+    const paints = [];
+    const clock = clockFor(a, { running: true, paints });
+    a.runner.onChange = reason => clock.mark(reason || 'chrome');
+    a.runner.log('first');
+    expect(clock.tick(10_000)).toBe(true);
+    const first = a.logCache.rows[0];
+    const lastId = a.logCache.lastId;
+    paints.length = 0;
+    for (let i = 0; i < 50; i++) a.runner.log(`flood ${i}`);
+    a.runner.status({ phase: 'Pack', progress: 0.4 });
+    clock.input();
+    expect(paints).toEqual(['input']);
+    expect(a.logCache.lastId).toBe(lastId);
+    expect(a.logCache.rows[0]).toBe(first);
+    expect(a.logCache.rows.some(row => row.text === 'flood 0')).toBe(false);
+    expect(clock.tick(10_000)).toBe(true);
+    expect(paints).toEqual(['input', 'frame']);
+    expect(a.logCache.rows[0]).toBe(first);
+    expect(a.logCache.rows.some(row => row.text === 'flood 49')).toBe(true);
+  });
+
+  test('motion paints once per spinner frame and idle paints nothing', () => {
+    const paints = [];
+    let running = false;
+    const clock = createFrameClock({
+      paint: () => paints.push('paint'),
+      isRunning: () => running,
+      motion: () => true,
+    });
+    expect(clock.tick(0)).toBe(false);
+    running = true;
+    expect(clock.tick(0)).toBe(true);
+    expect(clock.tick(89)).toBe(false);
+    expect(clock.tick(90)).toBe(true);
+    expect(paints).toEqual(['paint', 'paint']);
+  });
+
+  test('reduced motion paints when the elapsed second changes', () => {
+    const paints = [];
+    const clock = createFrameClock({
+      paint: () => paints.push('paint'),
+      isRunning: () => true,
+      motion: () => false,
+    });
+    expect(clock.tick(1_000)).toBe(true);
+    expect(clock.tick(1_500)).toBe(false);
+    expect(clock.tick(2_000)).toBe(true);
+    expect(paints).toEqual(['paint', 'paint']);
   });
 });

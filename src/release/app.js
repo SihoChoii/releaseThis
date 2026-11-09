@@ -1,11 +1,11 @@
 import { STAGES, ARTIFACTS, inspectWorkspace, releaseDefaults, planRelease, stepBlock, publishBlock, nextBuild, sameVersion, demoWorkspace } from './model.js';
-import { Runner } from './runner.js';
+import { Runner } from '../tui/runner.js';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 export class App {
-  constructor({ root, demo = false, motion = true, onChange = () => {}, onQuit = () => {}, script }) {
-    Object.assign(this, { root, demo, motion, onChange, onQuit });
+  constructor({ root, repo = null, demo = false, motion = true, onChange = () => {}, onQuit = () => {}, script }) {
+    Object.assign(this, { root, repo, demo, motion, onChange, onQuit });
     this.workspace = null;
     this.refreshing = false;
     this.screen = 'home';
@@ -18,7 +18,7 @@ export class App {
     this.modal = null;
     this.notice = '';
     this.preflightReady = false;
-    this.runner = new Runner({ root, script: script || `${root}/script/release.sh`, demo, onChange });
+    this.runner = new Runner({ root, script: script || `${root}/script/release.sh`, demo, repo, onChange: reason => this.onChange(reason) });
   }
 
   async refresh() {
@@ -129,7 +129,7 @@ export class App {
     const built = this.workspace.built;
     this.confirm('Publish to GitHub', [
       `Tag: v${built.version}+${built.build}`,
-      `Repo: ${process.env.HOLDTHIS_RELEASE_REPO || 'SihoChoii/HoldThis-Releases'}`, '',
+      `Repo: ${this.repo || 'repo unknown'}`, '',
       ...ARTIFACTS.slice(2).map(([, path]) => path.replace('dist/', '')),
       '', 'Creates a public release and marks it latest.',
       'The release script revalidates the files before upload.',

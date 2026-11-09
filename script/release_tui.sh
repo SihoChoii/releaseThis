@@ -6,4 +6,4 @@ if ! command -v bun >/dev/null 2>&1; then
   echo "The release cockpit needs Bun 1.3 or later: https://bun.sh" >&2
   exit 1
 fi
-exec bun "$ROOT_DIR/script/tui/index.js" "$@"
+exec bun "$ROOT_DIR/bin/cli.js" "$@"

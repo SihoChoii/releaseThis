@@ -1,4 +1,4 @@
-import { box, fit, wrap, plain } from './terminal.js';
+import { box, fit, wrap, plain } from '../tui/terminal.js';
 
 const help = [
   'Navigate', '↑ ↓ or J K   Move through actions, artifacts, or steps',

@@ -1,4 +1,7 @@
-import { cleanOutput } from './runner.js';
+import { stripVTControlCharacters } from 'node:util';
+
+// Tool output must never be interpreted as cursor or clipboard commands.
+export const cleanOutput = text => stripVTControlCharacters(text).replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '');
 
 export const palette = { ink: '#e7e9ed', muted: '#929cad', line: '#475569', amber: '#f5bd72', ice: '#83cbd8', mint: '#99d5ad', red: '#f08d96' };
 const rgb = hex => hex.match(/[a-f\d]{2}/gi).map(n => parseInt(n, 16)).join(';');

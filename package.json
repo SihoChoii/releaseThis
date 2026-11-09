@@ -1,12 +1,23 @@
 {
   "name": "releasethis",
   "private": true,
+  "description": "Release cockpit TUI for driving a project's release script",
   "type": "module",
-  "scripts": {
-    "tui": "bun script/tui/index.js",
-    "tui:demo": "bun script/tui/index.js --demo",
-    "test": "bun test script/tui",
-    "test:tui": "bun test script/tui"
+  "bin": {
+    "releasethis": "./bin/cli.js"
   },
-  "engines": { "bun": ">=1.3.0" }
+  "files": [
+    "bin/",
+    "src/",
+    "README.md"
+  ],
+  "scripts": {
+    "tui": "bun bin/cli.js",
+    "tui:demo": "bun bin/cli.js --demo",
+    "test": "bun test test",
+    "test:tui": "bun test test"
+  },
+  "engines": {
+    "bun": ">=1.3.0"
+  }
 }
