@@ -1,17 +1,4 @@
-import { box, fit, wrap, plain } from './terminal.js';
-
-const help = [
-  'Navigate', '↑ ↓ or J K   Move through actions, artifacts, or steps',
-  'Enter         Review action / inspect artifact', 'Tab / Shift+Tab   Next / previous view',
-  'W / A / L     Workspace / artifacts / logs', '/ or Ctrl+P   Search all commands', '',
-  'Release', '1 / 2 / 3     New release / publish / individual steps',
-  'F2            Cycle version presets in the editor', 'N             Toggle notarization',
-  'T             Review remaining stages after interruption', 'R             Refresh files and checksums', '',
-  'Logs', 'F             Filter output (Esc clears the filter)', 'E             Save retained output to dist/tui-logs/',
-  'PgUp / PgDn   Scroll a page', 'Home / End    Oldest output / follow live output', '',
-  'Session', 'M             Toggle animations', 'Ctrl+C        Stop active task / quit when idle',
-  'Esc           Back / close dialog', 'Q             Quit (reviews cancellation while running)',
-];
+import { box, fit, wrap, plain } from '../tui/terminal.js';
 
 export function dialog(app, width, maxHeight, c) {
   const m = app.modal;
@@ -28,12 +15,13 @@ export function dialog(app, width, maxHeight, c) {
       const row = fit(label, width - 9) + fit(cmd.hint || '', 5);
       body.push(index === m.index ? c.selected(row, width - 2) : c(row));
     });
-    if (!matches.length) body.push(' ' + c('No commands match. Try “build” or “logs”.', 'muted'));
+    if (!matches.length) body.push(' ' + c('No commands match. Try “logs” or “refresh”.', 'muted'));
     const selected = matches[m.index];
     body.push('', ' ' + c(selected?.detail || 'Type to filter commands by name.', 'muted'));
     footer = [' ' + c(`${matches.length ? m.index + 1 : 0}/${matches.length}   ↑ ↓ select   Enter run   Esc close`, 'muted')];
   } else if (m.type === 'release') {
     title = 'New release';
+    const plan = app.formPlan();
     const field = (label, value, index) => {
       const selected = m.field === index;
       const available = width - 19;
@@ -42,11 +30,11 @@ export function dialog(app, width, maxHeight, c) {
       const row = ` ${selected ? '❯' : ' '} ${label.padEnd(10)} ${shown}`;
       return selected ? c.selected(fit(row, width - 3), width - 2) : c(row);
     };
-    body = [' ' + c(`F2 preset: ${['Suggested', 'Patch', 'Minor', 'Major', 'Rebuild'][m.preset ?? 0] || 'Custom'}`, 'ice'), '',
-      field('Version', m.version, 0), field('Build', m.build, 1), '',
-      ...wrap(app.signedOnly ? 'Signed only: skips Apple notarization.' : 'Build, sign, notarize, and package both archives.', width - 4).map(l => ' ' + c(l, app.signedOnly ? 'amber' : 'muted')),
-      ...wrap(m.error || 'Increase the build to deliver an update. Rebuild keeps the current version and build.', width - 4).map(l => ' ' + c(l, m.error ? 'red' : 'muted'))];
-    footer = [m.field === 2 ? c.selected(' ❯ Review release →', width - 2) : c('   Review release →', 'ink', true),
+    body = [' ' + c(`F2 preset: ${plan.presets[m.preset]?.name || 'Custom'}`, 'ice'), '',
+      field(plan.fields[0].label, m[plan.fields[0].name], 0), field(plan.fields[1].label, m[plan.fields[1].name], 1), '',
+      ...wrap(plan.hint(app.context()), width - 4).map(l => ' ' + c(l, app.signedOnly ? 'amber' : 'muted')),
+      ...wrap(m.error || plan.help, width - 4).map(l => ' ' + c(l, m.error ? 'red' : 'muted'))];
+    footer = [m.field === 2 ? c.selected(` ❯ ${plan.submit}`, width - 2) : c(`   ${plan.submit}`, 'ink', true),
       ' ' + c('Tab next   Ctrl+U clear   Enter next   Esc close', 'muted')];
   } else if (m.type === 'filter') {
     title = 'Filter log output';
@@ -57,7 +45,7 @@ export function dialog(app, width, maxHeight, c) {
     footer = [' ' + c('Enter apply   Ctrl+U clear   Esc cancel', 'muted')];
   } else {
     title = m.type === 'help' ? 'Keyboard controls' : m.title;
-    body = (m.type === 'help' ? help : m.lines).flatMap(line => wrap(line, width - 4).map(l => ' ' + c(l)));
+    body = (m.type === 'help' ? app.helpLines() : m.lines).flatMap(line => wrap(line, width - 4).map(l => ' ' + c(l)));
     if (m.type === 'confirm') {
       const cancel = m.choice === 0 ? c('❯ Cancel', 'amber', true) : c('  Cancel', 'muted');
       const action = c(`${m.choice === 1 ? '❯' : ' '} ${m.action}`, m.choice === 1 ? m.danger ? 'red' : 'amber' : 'ink', true);

@@ -1,4 +1,4 @@
-# HoldThis release cockpit
+# releaseThis release cockpit
 
 A native terminal interface written in JavaScript for Bun 1.3+. No framework, install step, network request, or npm dependency is needed to open it. Start with `bun run tui:demo` to try all interactions using simulated output.
 
@@ -7,7 +7,7 @@ A native terminal interface written in JavaScript for Bun 1.3+. No framework, in
 The bucket-shaped mark anchors a restrained terminal palette. Amber (`#f5bd72`) marks selection and actions, ice (`#83cbd8`) marks activity, mint (`#99d5ad`) marks completed work, and rose (`#f08d96`) marks failures. Text (`#e7e9ed`) and muted slate (`#929cad`) inherit the terminal background. Symbols and labels accompany colors. The terminal's own monospace font controls typography. Selected rows use a slate highlight, while readiness counts, prerequisites, and the current task explain what can happen next.
 
 ```text
- ▗▖ ▗▖  HoldThis / release cockpit
+ ▗▖ ▗▖  releaseThis / release cockpit
  ▐▙▄▟▌  Apple Silicon • notarize & staple
 
  ● Workspace   · Artifacts   · Logs       / commands  ? help
@@ -24,7 +24,7 @@ The bucket-shaped mark anchors a restrained terminal palette. Amber (`#f5bd72`) 
  Enter select   Tab views   / commands   ? help   Q quit
 ```
 
-At 100 columns the pipeline becomes a persistent sidebar. Narrow terminals use one panel, with a dedicated six-step selection screen. The minimum size is 58×20; smaller windows show a resize hint. Rendering reserves the last column to prevent terminal autowrap. Rows are updated only when their contents change. Idle screens have no animation; active tasks use a 90 ms spinner, stage timers, and a completed-stage progress bar. `--no-motion`, `HOLDTHIS_REDUCED_MOTION=1`, and the M key disable animation. `NO_COLOR` removes color.
+At 100 columns the pipeline becomes a persistent sidebar. Narrow terminals use one panel, with a dedicated six-step selection screen. The minimum size is 58×20; smaller windows show a resize hint. Rendering reserves the last column to prevent terminal autowrap. Rows are updated only when their contents change. Idle screens have no animation; active tasks use a 90 ms spinner, stage timers, and a completed-stage progress bar. `--no-motion`, `RELEASETHIS_REDUCED_MOTION=1`, and the M key disable animation. `NO_COLOR` removes color.
 
 Release editing, command search, review, help, artifact inspection, and cancellation appear in centered dialogs. Long reviews and help scroll with arrow keys or Page Up/Page Down, while dialog controls stay visible. The command palette scrolls through all results and supports multiword search; Home/End jump to the first/last match. Confirmation defaults to Cancel. A release never automatically publishes: validation runs first, its logs remain available to read, and P opens a separate upload review.
 
@@ -39,14 +39,14 @@ Release editing, command search, review, help, artifact inspection, and cancella
 
 ## Implementation
 
-- `index.js`: CLI flags, terminal lifecycle, raw keyboard input, resize handling, and differential drawing.
-- `app.js`: navigation, forms, action review, and publish validation flow.
-- `view.js`: responsive workspace, readiness, artifacts, pipeline, and task status.
-- `terminal.js` / `dialogs.js`: color, width handling, wrapping, and scrollable overlays.
-- `logs.js`: cached wrapping, filtering, and stable log scroll positions.
-- `model.js`: streamed checksum validation, plist inspection, prerequisites, and release planning.
-- `runner.js`: sequential backend commands, bounded output, UTF-8 decoding, process-group cancellation, and demo simulation.
-- `tui.test.js`: planning, keyboard, terminal-size, checksum, failure, and child-process tests.
+- `bin/cli.js`: CLI flags and wiring into the cockpit runtime.
+- `src/tui/runtime.js`: terminal lifecycle, raw keyboard input, resize handling, and differential drawing.
+- `src/tui/terminal.js` / `src/tui/format.js` / `src/tui/logs.js` / `src/tui/runner.js`: paint, formatting, log viewport, and process supervision.
+- `src/release/app.js`: navigation, forms, action review, and publish validation flow.
+- `src/release/view.js`: responsive workspace, readiness, artifacts, pipeline, and task status.
+- `src/release/dialogs.js`: scrollable overlays for palette, forms, help, and confirmations.
+- `src/workflow/model.js` and `src/profiles/holdthis.js`: facts, tasks, and plans. The HoldThis profile owns checksum validation, plist inspection, prerequisites, and release planning.
+- `test/tui.test.js`: planning, keyboard, terminal-size, checksum, failure, and child-process tests.
 
 Real actions invoke `script/release.sh` with an argument array. The shell backend still performs signing, notarization, Gatekeeper checks, release validation, and GitHub upload. Tool output is stripped of terminal control sequences. Output retains the latest 2,500 lines for the current session. Cancellation sends SIGTERM to the entire process group and escalates to SIGKILL after three seconds if needed. Completed files and version edits are retained so individual steps can be rerun.
 
