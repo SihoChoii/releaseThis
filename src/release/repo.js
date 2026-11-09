@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 export function parseGithubRepo(url) {
   if (!url || typeof url !== 'string') return null;
   const trimmed = url.trim().replace(/\.git$/i, '');
-  const https = trimmed.match(/^https?:\/\/(?:www\.)?github\.com\/([^/]+)\/([^/]+?)\/?$/i);
+  const https = trimmed.match(/^https?:\/\/(?:[^@/\s]+@)?(?:www\.)?github\.com\/([^/]+)\/([^/]+?)\/?$/i);
   if (https) return `${https[1]}/${https[2]}`;
   const ssh = trimmed.match(/^git@github\.com:([^/]+)\/([^/]+?)\/?$/i);
   if (ssh) return `${ssh[1]}/${ssh[2]}`;

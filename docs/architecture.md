@@ -25,7 +25,7 @@ HoldThis's current pipeline is the first profile and the stress test for the hos
 
 ## Current state
 
-The code already splits terminal machinery from the product, but the product is one HoldThis-shaped object.
+The cockpit renders a profile. HoldThis is that profile, registered in-process from `bin/cli.js`. Phase 4 is what loads a profile from the working directory.
 
 | Path | Role today |
 |---|---|
@@ -35,14 +35,15 @@ The code already splits terminal machinery from the product, but the product is 
 | `src/tui/terminal.js` | Palette, fit/wrap, boxes, spinner, progress bar. |
 | `src/tui/format.js` | Byte sizes and durations. |
 | `src/tui/logs.js` | Log viewport. Append-only wrap cache keyed by width and filter. A paused viewport keeps its anchor. The 2,500-line cap lives in the runner. |
-| `src/tui/runner.js` | Spawns `script/release.sh` with an argument list. Cancel is SIGTERM to the process group, then SIGKILL after three seconds. Demo output is a HoldThis message table, and demo steps also fill the status slot. Child `::status` lines update that slot and stay out of the transcript. |
-| `src/release/model.js` | `STAGES`, HoldThis artifact paths, version rules, `planRelease`, `stepBlock`, `publishBlock`, workspace inspect. |
-| `src/release/app.js` | Navigation, version form, publish's validate-then-upload gate, signed-only mode, resume, demo fact updates. |
-| `src/release/view.js` | Header, tabs, pipeline, artifacts, logs, progress. The running row and footer read the status slot. Knows stage ids, "6 files," and the staple line. |
-| `src/release/dialogs.js` | Palette, forms, help, confirmations. |
+| `src/tui/runner.js` | Plan runner. Spawns the profile script with the task's argv. Cancel is SIGTERM to the process group, then SIGKILL after three seconds. Demo playback reads lines declared on the task. Child `::status` lines fill the status slot and stay out of the transcript. The recorded plan instance sits beside `jobs`. |
+| `src/workflow/model.js` | Facts, task resolution, semver and integer fields, plan resolve, and command-binding checks. |
+| `src/profiles/holdthis.js` | HoldThis catalog, probes, version parameters, signed-only mode, publish plan, demo lines, and product copy. |
+| `src/release/app.js` | Session: navigation, plan start, publish's validate-then-upload gate, mode toggle, resume, and demo fact application. It does not name HoldThis paths or stage ids. |
+| `src/release/view.js` | Header, tabs, pipeline, artifacts, logs, progress. Rows, readiness, and the header come from the profile's descriptors. The running row and footer read the status slot. |
+| `src/release/dialogs.js` | Palette, schema-driven form, help generated from the command list, and confirmations. |
 | `src/release/repo.js` | GitHub `owner/repo` from `origin` or `RELEASETHIS_REPO`. |
 
-The pipeline stages in `STAGES` are:
+The HoldThis catalog, in [`src/profiles/holdthis.js`](../src/profiles/holdthis.js), is:
 
 | Id | Label | Work |
 |---|---|---|
@@ -63,7 +64,7 @@ Paint behavior worth keeping:
 - Log wrapping is append-only. A paused viewport keeps its anchor when new lines arrive.
 - `--no-motion`, `RELEASETHIS_REDUCED_MOTION=1`, `M`, and `NO_COLOR` already exist.
 
-Phase 1 has landed. The sampler is `src/tui/frame.js`. An identical status patch does not mark the frame dirty. Phase 2 has landed in `src/tui/runner.js` and `src/release/view.js`: child `::status` lines fill the slot, and the running row and footer read it.
+Phase 1 has landed. The sampler is `src/tui/frame.js`. An identical status patch does not mark the frame dirty. Phase 2 has landed in `src/tui/runner.js` and `src/release/view.js`: child `::status` lines fill the slot, and the running row and footer read it. Phase 3 has landed: facts, tasks, and plans are the product model, and HoldThis is the in-process profile.
 
 ## Target
 
@@ -238,7 +239,7 @@ Each phase leaves `bun run tui:demo` and the current tests behaving as they do n
 
 - [x] **1. Make bursts cheap.** Split status dirtiness from log dirtiness. Coalesce runner updates onto the frame clock while a task is running. Wrap only new log lines. Ignore patches that do not change visible text. Exit when a synthetic flood of lines and status patches still paints once per frame, and a keypress does not wait on that flood. Landed in `src/tui/frame.js`, `src/tui/logs.js`, and `src/tui/runner.js`.
 - [x] **2. Add the status slot to the current runner.** Parse the status sentinel in `runner.js`. Point the active pipeline row and the footer at the slot. Teach the demo stages to emit phases. Exit when a demo task shows a phase and, when it has a fraction, a moving bar, and sentinel lines do not appear in the log. Landed in `src/tui/runner.js` and `src/release/view.js`.
-- [ ] **3. Turn the HoldThis cockpit into an in-repo profile.** Introduce facts, tasks, and plans as data. Move `STAGES`, artifact paths, `planRelease`, `stepBlock`, `publishBlock`, signed-only, and the publish gate behind that profile. The view renders tasks and facts. Exit when `view.js` and `app.js` no longer mention HoldThis paths or stage ids, and the existing keyboard, blocker, and pipeline tests pass against the profile.
+- [x] **3. Turn the HoldThis cockpit into an in-repo profile.** Introduce facts, tasks, and plans as data. Move the catalog, artifact paths, release planning, step requirements, publish blockers, signed-only, and the publish gate behind that profile. The view renders tasks and facts. Exit when `view.js` and `app.js` no longer mention HoldThis paths or stage ids, and the existing keyboard, blocker, and pipeline tests pass against the profile. Landed in `src/workflow/model.js`, `src/profiles/holdthis.js`, `src/tui/runner.js`, and `src/release/`.
 - [ ] **4. Load a profile from the repo being released.** Read the profile from the current working directory. Support command tasks, file artifacts, modes, plans, and confirm gates. A missing profile explains how to add one. Exit when a fixture repo with three declarative steps runs under demo and against a temp script, and the HoldThis demo still passes.
 - [ ] **5. Refresh without freezing.** Run independent probes concurrently, isolate a probe failure to its own facts, and stream checksums. Show probe progress through the status slot. Exit when a slow probe does not block `Q` or tab changes, and one failed probe leaves the other facts on screen.
 - [ ] **6. Prove the host is generic.** Add a second fixture profile with different task ids, no Apple steps, and its own publish plan. Exit when adding that fixture does not require a renderer change, and the host has no branch on profile id.
@@ -252,10 +253,10 @@ Phase 1 comes before any plugin is allowed to report often. Phase 3 comes before
 |---|---|
 | `src/tui/runtime.js`, `frame.js`, `terminal.js`, `format.js`, `dialogs.js` | Stay host. |
 | `src/tui/logs.js` | Stay host. Append-only wrap cache landed in phase 1. |
-| `src/tui/runner.js` | Host plan runner and status parser. The latest-value slot landed in phase 1. Lose the HoldThis demo table in phase 3. |
+| `src/tui/runner.js` | Host plan runner and status parser. The latest-value slot landed in phase 1. The HoldThis demo table left in phase 3; tasks declare their own lines. |
 | `src/tui/frame.js` | Frame sampler from phase 1. One paint per 90ms tick for log, status, and animation. |
-| `src/release/view.js`, `app.js` | Host chrome and session. Stop naming stages and artifact paths in phase 3. |
-| `src/release/model.js` | HoldThis profile: tasks, probes, plans, modes. |
+| `src/release/view.js`, `app.js` | Host chrome and session. They read profile descriptors as of phase 3. |
+| `src/profiles/holdthis.js` | HoldThis profile: tasks, probes, plans, modes. In-process through phase 6. |
 | `src/release/repo.js` | Stay host. |
 | `bin/cli.js` | Load the cwd profile in phase 4. |
 
@@ -283,6 +284,10 @@ Settled in the planning conversation on 2026-11-08.
 | Probes that declare disjoint fact keys run concurrently. | Phase 5 default. |
 | Status sentinels are `::status key=value` lines. | Double quotes hold spaces. `\"` and `\\` are the escapes. A malformed line is logged and does not fail the task. Sentinels stay out of the transcript. |
 | A running status slot is quiet after 15 seconds. | The footer keeps the phase and says work is still going, with the age of the last update. |
+| The in-repo HoldThis profile lives at `src/profiles/holdthis.js` through phase 6. | `bin/cli.js` registers it. The cockpit does not import it. |
+| Phase 3 keeps today's task ids, with argv stored separately. | Ids stay `notarize-app`, `dmg`, and `checksums`. A later rename does not have to change `script/release.sh` arguments. |
+| HoldThis renders six flat pipeline rows. | The host prints a group heading only when a task sets `group`. This profile does not. |
+| Structural keys and host chrome win a binding collision. | A profile key that repeats a reserved key, or another profile key, is rejected when the session is constructed. |
 
 ## Open questions
 
@@ -291,9 +296,7 @@ Settled in the planning conversation on 2026-11-08.
 4. Task id scheme. Working proposal is short ids inside a profile (`sign`, `zip`) with the profile as the namespace, so two profiles can both have a `build` task.
 5. Sidebar grouping. Do zip and package render as a packaging group, or as six flat rows matching today?
 6. Declarative status parsing. Is the sentinel the only supported channel for command tasks, or can a profile also name a single line pattern for tools that already print `40%`?
-7. Form field set. Semver, integer, string, choice, and bool are the working set. What is the first real field type a second profile needs that this set cannot cover?
-8. Command conflicts. When a profile binding collides with a structural key or another command, is the structural key always reserved and the later command rejected at load?
-9. Where the reference HoldThis profile sits during phases 3–6. In-repo module first is decided. The directory name (`src/profiles/holdthis` versus staying under `src/release`) is not.
+7. Form field set. Semver and integer shipped with phase 3. String, choice, and bool remain the working set. What is the first real field type a second profile needs that this set cannot cover?
 10. Demo for declarative profiles. Does a declarative task list scripted lines inline, or is demo mode "run the command with a fake PATH"?
 11. Multiple profiles in one repo. Working assumption is one profile per repo. Is a named export (`releasethis --profile nightly`) needed in the first loader?
 

@@ -6,11 +6,12 @@ import { spawnSync } from 'node:child_process';
 import { parseGithubRepo, detectGithubRepo } from '../src/release/repo.js';
 import { App } from '../src/release/app.js';
 import { render } from '../src/release/view.js';
-import { demoWorkspace } from '../src/release/model.js';
+import { holdthis } from '../src/profiles/holdthis.js';
 
 describe('parseGithubRepo', () => {
   test('parses HTTPS, SSH, and ssh:// forms with optional .git', () => {
     expect(parseGithubRepo('https://github.com/SihoChoii/releaseThis.git')).toBe('SihoChoii/releaseThis');
+    expect(parseGithubRepo('https://x-access-token:secret@github.com/SihoChoii/releaseThis.git')).toBe('SihoChoii/releaseThis');
     expect(parseGithubRepo('https://github.com/SihoChoii/releaseThis')).toBe('SihoChoii/releaseThis');
     expect(parseGithubRepo('https://www.github.com/owner/repo.git')).toBe('owner/repo');
     expect(parseGithubRepo('git@github.com:owner/repo.git')).toBe('owner/repo');
@@ -57,8 +58,8 @@ describe('detectGithubRepo', () => {
 
 describe('repo in UI', () => {
   test('publish confirm and header include the detected repo', () => {
-    const a = new App({ root: '/tmp', demo: true, repo: 'SihoChoii/releaseThis' });
-    a.workspace = demoWorkspace();
+    const a = new App({ root: '/tmp', demo: true, repo: 'SihoChoii/releaseThis', profile: holdthis });
+    a.workspace = holdthis.demoWorkspace();
     a.preflightReady = true;
     a.publish();
     expect(a.modal.lines.join(' ')).toContain('SihoChoii/releaseThis');
@@ -67,8 +68,8 @@ describe('repo in UI', () => {
   });
 
   test('unknown repo shows a fallback label', () => {
-    const a = new App({ root: '/tmp', demo: true, repo: null });
-    a.workspace = demoWorkspace();
+    const a = new App({ root: '/tmp', demo: true, repo: null, profile: holdthis });
+    a.workspace = holdthis.demoWorkspace();
     a.preflightReady = true;
     a.publish();
     expect(a.modal.lines.join(' ')).toContain('repo unknown');

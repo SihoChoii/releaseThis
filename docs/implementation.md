@@ -12,10 +12,10 @@ Section order below is a design boundary, not the build order. The build order i
 |---|---|---|---|
 | [Frame budget](#1-frame-budget) | `docs/impl/frame-budget.md` | 1 | Done |
 | [Status channel](#2-status-channel) | `docs/impl/status-channel.md` | 2 | Done |
-| [Workflow model](#3-workflow-model) | `docs/impl/workflow-model.md` | 3 | Not started |
-| [Cockpit](#4-cockpit) | `docs/impl/cockpit.md` | 3 | Not started |
-| [Plan execution](#5-plan-execution) | `docs/impl/plan-execution.md` | 3 | Not started |
-| [HoldThis profile](#6-holdthis-profile) | `docs/impl/holdthis-profile.md` | 3 | Not started |
+| [Workflow model](#3-workflow-model) | `docs/impl/workflow-model.md` | 3 | Done |
+| [Cockpit](#4-cockpit) | `docs/impl/cockpit.md` | 3 | Done |
+| [Plan execution](#5-plan-execution) | `docs/impl/plan-execution.md` | 3 | Done |
+| [HoldThis profile](#6-holdthis-profile) | `docs/impl/holdthis-profile.md` | 3 | Done |
 | [Profiles](#7-profiles) | `docs/impl/profiles.md` | 4 | Not started |
 | [Workspace refresh](#8-workspace-refresh) | `docs/impl/workspace-refresh.md` | 5 | Not started |
 | [Host genericity](#9-host-genericity) | `docs/impl/host-genericity.md` | 6–7 | Not started |

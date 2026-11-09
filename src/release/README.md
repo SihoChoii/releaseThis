@@ -45,7 +45,7 @@ Release editing, command search, review, help, artifact inspection, and cancella
 - `src/release/app.js`: navigation, forms, action review, and publish validation flow.
 - `src/release/view.js`: responsive workspace, readiness, artifacts, pipeline, and task status.
 - `src/release/dialogs.js`: scrollable overlays for palette, forms, help, and confirmations.
-- `src/release/model.js`: streamed checksum validation, plist inspection, prerequisites, and release planning.
+- `src/workflow/model.js` and `src/profiles/holdthis.js`: facts, tasks, and plans. The HoldThis profile owns checksum validation, plist inspection, prerequisites, and release planning.
 - `test/tui.test.js`: planning, keyboard, terminal-size, checksum, failure, and child-process tests.
 
 Real actions invoke `script/release.sh` with an argument array. The shell backend still performs signing, notarization, Gatekeeper checks, release validation, and GitHub upload. Tool output is stripped of terminal control sequences. Output retains the latest 2,500 lines for the current session. Cancellation sends SIGTERM to the entire process group and escalates to SIGKILL after three seconds if needed. Completed files and version edits are retained so individual steps can be rerun.

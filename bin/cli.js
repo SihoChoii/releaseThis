@@ -3,6 +3,7 @@ import { App } from '../src/release/app.js';
 import { detectGithubRepo } from '../src/release/repo.js';
 import { render } from '../src/release/view.js';
 import { runCockpit } from '../src/tui/runtime.js';
+import { holdthis } from '../src/profiles/holdthis.js';
 
 const args = process.argv.slice(2);
 const allowed = new Set(['--demo', '--snapshot', '--no-motion', '--help', '-h']);
@@ -44,5 +45,6 @@ await runCockpit({
     motion: !args.includes('--no-motion') && process.env.RELEASETHIS_REDUCED_MOTION !== '1',
     onChange,
     onQuit,
+    profile: holdthis,
   }),
 });

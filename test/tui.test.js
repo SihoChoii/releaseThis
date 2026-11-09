@@ -4,17 +4,22 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { App } from '../src/release/app.js';
-import { Runner, cleanOutput, takeStatusLine, demoSteps } from '../src/tui/runner.js';
+import { Runner, cleanOutput, takeStatusLine } from '../src/tui/runner.js';
 import { createFrameClock } from '../src/tui/frame.js';
 import { visibleLogs } from '../src/tui/logs.js';
-import { checksumOK, demoWorkspace, planRelease, releaseDefaults, stepBlock, publishBlock } from '../src/release/model.js';
+import { holdthis, checksumOK } from '../src/profiles/holdthis.js';
+import { openingParams, planBlock, requirement, resolvePlan } from '../src/workflow/model.js';
 import { render, fit, spinner } from '../src/release/view.js';
 
 let temp;
 beforeEach(async () => { temp = await mkdtemp(join(tmpdir(), 'releasethis-tui-')); });
 afterEach(async () => { await rm(temp, { recursive: true, force: true }); });
 const key = name => ({ name });
-const app = () => { const a = new App({ root: temp, demo: true }); a.workspace = demoWorkspace(); return a; };
+const app = () => { const a = new App({ root: temp, demo: true, profile: holdthis }); a.workspace = holdthis.demoWorkspace(); return a; };
+function releaseContext(source, version, build, signedOnly, facts = holdthis.demoFacts()) {
+  facts.get('version.source').value = { ...source };
+  return { facts, params: { version, build }, mode: { signedOnly }, demo: false, env: process.env, commandLine: holdthis.commandLine };
+}
 async function script(source) {
   const path = join(temp, 'release.sh');
   await writeFile(path, '#!/bin/bash\nset -eu\n' + source);
@@ -24,41 +29,44 @@ async function script(source) {
 
 describe('release planning and prerequisites', () => {
   const source = { version: '1.0.2', build: '3' };
+  const plan = holdthis.plans.release;
   test('rebuilding keeps version and runs all six stages in backend order', () => {
-    expect(planRelease(source, '1.0.2', '3', false).map(j => j.args)).toEqual([
+    expect(resolvePlan(plan, releaseContext(source, '1.0.2', '3', false)).map(job => job.args)).toEqual([
       ['build'], ['sign'], ['notarize-app'], ['zip'], ['dmg'], ['checksums'],
     ]);
   });
   test('changed version keeps or increases the build explicitly', () => {
-    expect(planRelease(source, '1.0.3', '3', false)[0].args).toEqual(['version', '1.0.3', '--keep-build']);
-    expect(planRelease(source, '1.0.3', '5', false)[0].args).toEqual(['version', '1.0.3', '--build', '5']);
+    expect(resolvePlan(plan, releaseContext(source, '1.0.3', '3', false))[0].args).toEqual(['version', '1.0.3', '--keep-build']);
+    expect(resolvePlan(plan, releaseContext(source, '1.0.3', '5', false))[0].args).toEqual(['version', '1.0.3', '--build', '5']);
   });
   test('signed-only removes app notarization and flags both archives', () => {
-    expect(planRelease(source, '1.0.2', '3', true).map(j => j.args)).toEqual([
+    expect(resolvePlan(plan, releaseContext(source, '1.0.2', '3', true)).map(job => job.args)).toEqual([
       ['build'], ['sign'], ['zip', '--signed-only'], ['dmg', '--signed-only'], ['checksums'],
     ]);
   });
   test('rejects invalid versions, shell payloads, zero and decreasing builds', () => {
-    for (const version of ['1.2', '01.0.2', '1.2.3; touch /tmp/no']) expect(() => planRelease(source, version, '4', false)).toThrow();
-    for (const build of ['0', '2', '4; exit', '01']) expect(() => planRelease(source, '1.0.3', build, false)).toThrow();
+    for (const version of ['1.2', '01.0.2', '1.2.3; touch /tmp/no']) expect(() => resolvePlan(plan, releaseContext(source, version, '4', false))).toThrow();
+    for (const build of ['0', '2', '4; exit', '01']) expect(() => resolvePlan(plan, releaseContext(source, '1.0.3', build, false))).toThrow();
   });
   test('only advances the default version after a complete matching release', () => {
-    const ws = demoWorkspace();
-    expect(releaseDefaults(ws)).toEqual(ws.source);
-    ws.built = { ...ws.source };
-    expect(releaseDefaults(ws)).toEqual({ version: '1.0.4', build: '5' });
-    ws.artifacts[4].state = 'mismatch';
-    expect(releaseDefaults(ws)).toEqual(ws.source);
+    const facts = holdthis.demoFacts();
+    const sourceFact = () => ({ ...facts.get('version.source').value });
+    expect(openingParams(plan, facts)).toEqual(sourceFact());
+    facts.get('version.built').value = sourceFact();
+    expect(openingParams(plan, facts)).toEqual({ version: '1.0.4', build: '5' });
+    facts.all().find(fact => fact.kind === 'checksum').state = 'mismatch';
+    expect(openingParams(plan, facts)).toEqual(sourceFact());
   });
   test('checks step prerequisites and publish blockers', () => {
-    const ws = demoWorkspace();
-    ws.stapled = false;
-    expect(stepBlock('zip', ws, false)).toContain('staple');
-    expect(stepBlock('zip', ws, true)).toBe('');
-    expect(stepBlock('notarize-app', ws, true)).not.toBe('');
-    expect(publishBlock(ws, true)).not.toBe('');
-    ws.artifacts[4].state = 'mismatch';
-    expect(publishBlock(ws, false)).not.toBe('');
+    const facts = holdthis.demoFacts();
+    facts.get('notarization.stapled').value = false;
+    const ctx = signedOnly => ({ facts, mode: { signedOnly } });
+    expect(requirement(holdthis.tasks.zip, ctx(false))).toContain('staple');
+    expect(requirement(holdthis.tasks.zip, ctx(true))).toBe('');
+    expect(requirement(holdthis.tasks['notarize-app'], ctx(true))).not.toBe('');
+    expect(planBlock(holdthis.plans.publish, ctx(true))).not.toBe('');
+    facts.all().find(fact => fact.kind === 'checksum').state = 'mismatch';
+    expect(planBlock(holdthis.plans.publish, ctx(false))).not.toBe('');
   });
   test('validates checksum bytes and recorded filename', async () => {
     const archive = join(temp, 'app.zip'), sha = archive + '.sha256';
@@ -562,17 +570,28 @@ printf '%s\\n' '::status phase=FromErr detail="Waiting for Apple"' >&2
   });
 
   test('demo build progress moves through the slot and stays out of the log', async () => {
-    const steps = demoSteps('build');
+    const steps = holdthis.tasks.build.demo;
     expect(steps.map(step => step.status.progress)).toEqual([1 / 3, 1 / 3, 2 / 3, 1]);
     expect(steps.map(step => step.status.phase)).toEqual(['Compile', 'Compile', 'Link', 'Stage']);
     const r = new Runner({ root: temp, script: 'unused', demo: true });
     r.demoPace = 0;
     const seen = [];
     r.onChange = reason => { if (reason === 'status' && r.statusSlot) seen.push(r.statusSlot.progress); };
-    expect(await r.run([{ id: 'build', label: 'Build app', args: ['build'] }])).toBe('done');
+    expect(await r.run([{ id: 'build', label: 'Build app', args: ['build'], demo: steps, display: holdthis.commandLine(['build']) }])).toBe('done');
     expect(seen).toEqual([1 / 3, 2 / 3, 1]);
     expect(r.logs.some(line => line.text.includes('Link HoldThis'))).toBe(true);
     expect(r.logs.some(line => line.text.includes('::status'))).toBe(false);
     expect(r.statusSlot).toBeNull();
+  });
+});
+
+describe('cockpit boundary', () => {
+  test('the renderer does not name HoldThis paths, stage ids, or product copy', async () => {
+    for (const file of ['app.js', 'view.js', 'dialogs.js']) {
+      const source = await readFile(new URL(`../src/release/${file}`, import.meta.url), 'utf8');
+      for (const word of ['HoldThis', 'notarize-app', 'script/release.sh', 'Apple Silicon']) {
+        expect(source.includes(word)).toBe(false);
+      }
+    }
   });
 });

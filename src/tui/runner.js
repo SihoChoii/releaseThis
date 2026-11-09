@@ -93,50 +93,6 @@ function readStatusFields(input) {
   }
 }
 
-export function demoSteps(jobId, { demoTag, repo } = {}) {
-  const step = (text, status) => ({ text, status });
-  const table = {
-    build: [
-      step('Compiling HoldThis for arm64…', { phase: 'Compile', progress: 1 / 3, completed: 1, total: 3 }),
-      step('[1/3] Compile Swift sources', { phase: 'Compile', progress: 1 / 3, completed: 1, total: 3 }),
-      step('[2/3] Link HoldThis', { phase: 'Link', progress: 2 / 3, completed: 2, total: 3 }),
-      step('[3/3] Stage resources and app icon', { phase: 'Stage', progress: 1, completed: 3, total: 3 }),
-    ],
-    sign: [
-      step('Signing holdthis-remux', { phase: 'Signing' }),
-      step('Signing HoldThis.app with Developer ID', { phase: 'Signing' }),
-      step('Verifying hardened runtime', { phase: 'Verifying' }),
-    ],
-    'notarize-app': [
-      step('Submitting app to Apple…', { phase: 'Submitting' }),
-      step('Waiting for Apple notarization…', { phase: 'Notarizing', detail: 'Waiting for Apple' }),
-      step('Accepted. Stapling ticket.', { phase: 'Stapling' }),
-    ],
-    zip: [
-      step('Creating updater ZIP', { phase: 'Packaging' }),
-      step('Verifying archive and app signature', { phase: 'Verifying' }),
-    ],
-    dmg: [
-      step('Composing illustrated installer', { phase: 'Packaging' }),
-      step('Signing and notarizing disk image', { phase: 'Signing' }),
-    ],
-    checksums: [
-      step('SHA-256: updater ZIP verified', { phase: 'Verifying' }),
-      step('SHA-256: installer DMG verified', { phase: 'Verifying' }),
-    ],
-    preflight: [
-      step(`Tag: ${demoTag || 'v1.0.2+3'}`, { phase: 'Checking' }),
-      step(`Repo: ${repo || 'repo unknown'}`, { phase: 'Checking' }),
-      step('Files: installer DMG, updater ZIP, two SHA-256 files', { phase: 'Checking' }),
-    ],
-    publish: [
-      step('Simulating GitHub upload', { phase: 'Uploading' }),
-      step('Simulating release digest verification', { phase: 'Verifying' }),
-    ],
-  };
-  return table[jobId] || [step('Version updated (simulation)', { phase: 'Version' })];
-}
-
 export class Runner {
   constructor({ root, script, onChange = () => {}, demo = false, repo = null, env = process.env }) {
     Object.assign(this, { root, script, onChange, demo, repo, env });
@@ -148,6 +104,7 @@ export class Runner {
     this.result = null;
     this.logRevision = 0;
     this.statusSlot = null;
+    this.session = null;
     this.demoPace = 600;
   }
 
@@ -182,9 +139,11 @@ export class Runner {
     else this.log(line);
   }
 
-  async run(jobs, { completed = [] } = {}) {
+  async run(jobs, { completed = [], session = undefined } = {}) {
     if (this.running) throw new Error('A release task is already running.');
+    if (session !== undefined) this.session = session;
     this.jobs = [...completed.map(job => ({ ...job })), ...jobs.map(job => ({ ...job, status: 'pending' }))];
+    if (this.session) this.session.tasks = this.jobs;
     this.running = true;
     this.cancelled = false;
     this.result = null;
@@ -199,7 +158,7 @@ export class Runner {
         job.status = 'running';
         job.startedAt = Date.now();
         this.statusSlot = null;
-        this.log(`$ ./script/release.sh ${job.args.join(' ')}`, 'command');
+        this.log(`$ ${job.display || (job.args || []).join(' ')}`, 'command');
         const code = this.demo ? await this.simulate(job) : await this.execute(job);
         job.endedAt = Date.now();
         job.status = this.cancelled ? 'cancelled' : code === 0 ? 'done' : 'failed';
@@ -276,10 +235,12 @@ export class Runner {
   }
 
   async simulate(job) {
-    for (const step of demoSteps(job.id, this)) {
+    const scripted = typeof job.demo === 'function' ? job.demo(this) : job.demo;
+    const steps = scripted?.length ? scripted : [{ text: 'Simulated.' }];
+    for (const step of steps) {
       await new Promise(resolve => setTimeout(resolve, this.demoPace));
       if (this.cancelled) return 1;
-      this.log(step.text);
+      if (step.text) this.log(step.text);
       if (step.status) this.status(step.status);
     }
     return 0;
