@@ -11,7 +11,7 @@ Section order below is a design boundary, not the build order. The build order i
 | Section | Technical document | Build phase | State |
 |---|---|---|---|
 | [Frame budget](#1-frame-budget) | `docs/impl/frame-budget.md` | 1 | Done |
-| [Status channel](#2-status-channel) | `docs/impl/status-channel.md` | 2 | Not started |
+| [Status channel](#2-status-channel) | `docs/impl/status-channel.md` | 2 | Done |
 | [Workflow model](#3-workflow-model) | `docs/impl/workflow-model.md` | 3 | Not started |
 | [Cockpit](#4-cockpit) | `docs/impl/cockpit.md` | 3 | Not started |
 | [Plan execution](#5-plan-execution) | `docs/impl/plan-execution.md` | 3 | Not started |
@@ -70,7 +70,7 @@ Plugins and child processes report fine-grained progress through one latest-valu
 
 **Done when.** A demo task shows a changing phase and, when it reports a fraction, a moving bar. Sentinel lines do not appear in the log. The frame budget test still holds.
 
-**Open questions.** Architecture questions 2 (sentinel grammar), 3 (stale threshold), and 6 (whether a declarative line pattern exists beyond the sentinel).
+**Open questions.** Architecture question 3 (whether a profile may override the 15-second stale threshold) and question 6 (whether a declarative line pattern exists beyond the sentinel).
 
 ## 3. Workflow model
 

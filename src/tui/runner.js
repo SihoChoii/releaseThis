@@ -3,6 +3,139 @@ import { StringDecoder } from 'node:string_decoder';
 import { cleanOutput } from './terminal.js';
 
 export { cleanOutput };
+export const STALE_AFTER_MS = 15_000;
+
+const STATUS_KEYS = new Set(['phase', 'detail', 'progress', 'completed', 'total']);
+
+function clipColumns(value, width) {
+  if (value == null || value === '') return null;
+  let used = 0, result = '';
+  for (const char of String(value)) {
+    const size = Bun.stringWidth(char);
+    if (used + size > width) break;
+    result += char;
+    used += size;
+  }
+  return result || null;
+}
+
+function finiteProgress(value) {
+  if (value == null || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 && number <= 1 ? number : null;
+}
+
+function count(value) {
+  if (value == null || value === '') return null;
+  const number = Number(value);
+  return Number.isInteger(number) && number >= 0 ? number : null;
+}
+
+// null: not a sentinel. { malformed }: log the line. { patch }: replace the slot.
+export function takeStatusLine(line) {
+  const trimmed = String(line).trim();
+  if (!trimmed.startsWith('::status')) return null;
+  const rest = trimmed.slice('::status'.length);
+  if (rest && !/^\s/.test(rest)) return null;
+  const fields = readStatusFields(rest);
+  if (!fields) return { malformed: true };
+  const patch = {};
+  if ('phase' in fields) patch.phase = fields.phase;
+  if ('detail' in fields) patch.detail = fields.detail;
+  if ('progress' in fields) {
+    if (!/^(?:0|1|0?\.\d+|\d+\.\d+)$/.test(fields.progress)) return { malformed: true };
+    const progress = Number(fields.progress);
+    if (!Number.isFinite(progress) || progress < 0 || progress > 1) return { malformed: true };
+    patch.progress = progress;
+  }
+  for (const key of ['completed', 'total']) {
+    if (!(key in fields)) continue;
+    if (!/^\d+$/.test(fields[key])) return { malformed: true };
+    patch[key] = Number(fields[key]);
+  }
+  return { patch };
+}
+
+function readStatusFields(input) {
+  const fields = {};
+  let i = 0;
+  const skip = () => { while (i < input.length && /\s/.test(input[i])) i++; };
+  while (true) {
+    skip();
+    if (i >= input.length) return Object.keys(fields).length ? fields : null;
+    const end = input.indexOf('=', i);
+    if (end <= i) return null;
+    const key = input.slice(i, end);
+    if (!STATUS_KEYS.has(key) || Object.hasOwn(fields, key) || /\s/.test(key)) return null;
+    i = end + 1;
+    if (input[i] === '"') {
+      i++;
+      let value = '', closed = false;
+      while (i < input.length) {
+        if (input[i] === '\\') {
+          const next = input[i + 1];
+          if (next !== '"' && next !== '\\') return null;
+          value += next;
+          i += 2;
+          continue;
+        }
+        if (input[i] === '"') { closed = true; i++; break; }
+        value += input[i++];
+      }
+      if (!closed || (i < input.length && !/\s/.test(input[i]))) return null;
+      fields[key] = value;
+    } else {
+      const start = i;
+      while (i < input.length && !/\s/.test(input[i])) i++;
+      if (start === i) return null;
+      fields[key] = input.slice(start, i);
+    }
+  }
+}
+
+export function demoSteps(jobId, { demoTag, repo } = {}) {
+  const step = (text, status) => ({ text, status });
+  const table = {
+    build: [
+      step('Compiling HoldThis for arm64…', { phase: 'Compile', progress: 1 / 3, completed: 1, total: 3 }),
+      step('[1/3] Compile Swift sources', { phase: 'Compile', progress: 1 / 3, completed: 1, total: 3 }),
+      step('[2/3] Link HoldThis', { phase: 'Link', progress: 2 / 3, completed: 2, total: 3 }),
+      step('[3/3] Stage resources and app icon', { phase: 'Stage', progress: 1, completed: 3, total: 3 }),
+    ],
+    sign: [
+      step('Signing holdthis-remux', { phase: 'Signing' }),
+      step('Signing HoldThis.app with Developer ID', { phase: 'Signing' }),
+      step('Verifying hardened runtime', { phase: 'Verifying' }),
+    ],
+    'notarize-app': [
+      step('Submitting app to Apple…', { phase: 'Submitting' }),
+      step('Waiting for Apple notarization…', { phase: 'Notarizing', detail: 'Waiting for Apple' }),
+      step('Accepted. Stapling ticket.', { phase: 'Stapling' }),
+    ],
+    zip: [
+      step('Creating updater ZIP', { phase: 'Packaging' }),
+      step('Verifying archive and app signature', { phase: 'Verifying' }),
+    ],
+    dmg: [
+      step('Composing illustrated installer', { phase: 'Packaging' }),
+      step('Signing and notarizing disk image', { phase: 'Signing' }),
+    ],
+    checksums: [
+      step('SHA-256: updater ZIP verified', { phase: 'Verifying' }),
+      step('SHA-256: installer DMG verified', { phase: 'Verifying' }),
+    ],
+    preflight: [
+      step(`Tag: ${demoTag || 'v1.0.2+3'}`, { phase: 'Checking' }),
+      step(`Repo: ${repo || 'repo unknown'}`, { phase: 'Checking' }),
+      step('Files: installer DMG, updater ZIP, two SHA-256 files', { phase: 'Checking' }),
+    ],
+    publish: [
+      step('Simulating GitHub upload', { phase: 'Uploading' }),
+      step('Simulating release digest verification', { phase: 'Verifying' }),
+    ],
+  };
+  return table[jobId] || [step('Version updated (simulation)', { phase: 'Version' })];
+}
 
 export class Runner {
   constructor({ root, script, onChange = () => {}, demo = false, repo = null, env = process.env }) {
@@ -15,6 +148,7 @@ export class Runner {
     this.result = null;
     this.logRevision = 0;
     this.statusSlot = null;
+    this.demoPace = 600;
   }
 
   log(text, kind = 'output') {
@@ -29,16 +163,23 @@ export class Runner {
   status(patch) {
     const source = patch ?? {};
     const next = {
-      phase: source.phase ?? null,
-      detail: source.detail ?? null,
-      progress: source.progress ?? null,
-      completed: source.completed ?? null,
-      total: source.total ?? null,
+      phase: clipColumns(source.phase, 40),
+      detail: clipColumns(source.detail, 120),
+      progress: finiteProgress(source.progress),
+      completed: count(source.completed),
+      total: count(source.total),
     };
     const slot = this.statusSlot;
     if (slot && slot.phase === next.phase && slot.detail === next.detail && slot.progress === next.progress && slot.completed === next.completed && slot.total === next.total) return;
     this.statusSlot = { ...next, heartbeatAt: Date.now() };
     this.onChange('status');
+  }
+
+  // Child stdout and stderr only. log() keeps a literal ::status line in the transcript.
+  ingestChildLine(line) {
+    const parsed = takeStatusLine(cleanOutput(line));
+    if (parsed?.patch) this.status(parsed.patch);
+    else this.log(line);
   }
 
   async run(jobs, { completed = [] } = {}) {
@@ -57,10 +198,12 @@ export class Runner {
         if (this.cancelled) break;
         job.status = 'running';
         job.startedAt = Date.now();
+        this.statusSlot = null;
         this.log(`$ ./script/release.sh ${job.args.join(' ')}`, 'command');
         const code = this.demo ? await this.simulate(job) : await this.execute(job);
         job.endedAt = Date.now();
         job.status = this.cancelled ? 'cancelled' : code === 0 ? 'done' : 'failed';
+        this.statusSlot = null;
         this.onChange('chrome');
         if (code !== 0 || this.cancelled) {
           this.result = this.cancelled ? 'cancelled' : 'failed';
@@ -74,6 +217,7 @@ export class Runner {
     } catch (error) {
       const active = this.jobs.find(j => j.status === 'running');
       if (active) active.status = 'failed';
+      this.statusSlot = null;
       this.result = 'failed';
       this.log(error.message, 'error');
       return this.result;
@@ -96,7 +240,7 @@ export class Runner {
           buffer += value;
           const lines = buffer.split(/\r\n|[\r\n]/);
           buffer = lines.pop();
-          for (const line of lines) if (line) this.log(line);
+          for (const line of lines) if (line) this.ingestChildLine(line);
           if (buffer.length > 8000) { this.log(buffer.slice(0, 4000)); buffer = buffer.slice(-4000); }
         };
         stream.on('data', chunk => consume(decoder.write(chunk)));
@@ -132,20 +276,11 @@ export class Runner {
   }
 
   async simulate(job) {
-    const messages = {
-      build: ['Compiling HoldThis for arm64…', '[1/3] Compile Swift sources', '[2/3] Link HoldThis', '[3/3] Stage resources and app icon'],
-      sign: ['Signing holdthis-remux', 'Signing HoldThis.app with Developer ID', 'Verifying hardened runtime'],
-      'notarize-app': ['Submitting app to Apple…', 'Waiting for Apple notarization…', 'Accepted. Stapling ticket.'],
-      zip: ['Creating updater ZIP', 'Verifying archive and app signature'],
-      dmg: ['Composing illustrated installer', 'Signing and notarizing disk image'],
-      checksums: ['SHA-256: updater ZIP verified', 'SHA-256: installer DMG verified'],
-      preflight: [`Tag: ${this.demoTag || 'v1.0.2+3'}`, `Repo: ${this.repo || 'repo unknown'}`, 'Files: installer DMG, updater ZIP, two SHA-256 files'],
-      publish: ['Simulating GitHub upload', 'Simulating release digest verification'],
-    };
-    for (const text of messages[job.id] || ['Version updated (simulation)']) {
-      await new Promise(resolve => setTimeout(resolve, 600));
+    for (const step of demoSteps(job.id, this)) {
+      await new Promise(resolve => setTimeout(resolve, this.demoPace));
       if (this.cancelled) return 1;
-      this.log(text);
+      this.log(step.text);
+      if (step.status) this.status(step.status);
     }
     return 0;
   }

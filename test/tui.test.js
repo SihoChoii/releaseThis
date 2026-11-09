@@ -4,11 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { App } from '../src/release/app.js';
-import { Runner, cleanOutput } from '../src/tui/runner.js';
+import { Runner, cleanOutput, takeStatusLine, demoSteps } from '../src/tui/runner.js';
 import { createFrameClock } from '../src/tui/frame.js';
 import { visibleLogs } from '../src/tui/logs.js';
 import { checksumOK, demoWorkspace, planRelease, releaseDefaults, stepBlock, publishBlock } from '../src/release/model.js';
-import { render, fit } from '../src/release/view.js';
+import { render, fit, spinner } from '../src/release/view.js';
 
 let temp;
 beforeEach(async () => { temp = await mkdtemp(join(tmpdir(), 'releasethis-tui-')); });
@@ -441,5 +441,138 @@ describe('frame budget', () => {
     expect(clock.tick(1_500)).toBe(false);
     expect(clock.tick(2_000)).toBe(true);
     expect(paints).toEqual(['paint', 'paint']);
+  });
+});
+
+describe('status channel', () => {
+  const glyphs = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+  const now = 1_700_000_000_000;
+  function running(phase) {
+    const a = app();
+    a.runner.running = true;
+    a.runner.startedAt = now - 20_000;
+    a.runner.jobs = [{ id: 'build', label: 'Build app', status: 'running', startedAt: now - 4_000 }];
+    if (phase) a.runner.status(phase);
+    return a;
+  }
+
+  test('parses quoted and unquoted sentinels and rejects a bad line', () => {
+    expect(takeStatusLine('::status phase=Linking progress=0.66 completed=2 total=3').patch).toEqual({
+      phase: 'Linking', progress: 0.66, completed: 2, total: 3,
+    });
+    expect(takeStatusLine('  ::status phase=Notarizing detail="Waiting for Apple"').patch).toEqual({
+      phase: 'Notarizing', detail: 'Waiting for Apple',
+    });
+    expect(takeStatusLine('::status phase=Say detail="a \\"b\\" \\\\ c"').patch.detail).toBe('a "b" \\ c');
+    expect(takeStatusLine('::status detail="no-end')).toEqual({ malformed: true });
+    expect(takeStatusLine('::status nope=1')).toEqual({ malformed: true });
+    expect(takeStatusLine('::status progress=2')).toEqual({ malformed: true });
+    expect(takeStatusLine('build ::status phase=A')).toBeNull();
+    expect(takeStatusLine('::statusphase=A')).toBeNull();
+  });
+
+  test('child sentinels update the slot and malformed lines stay in the log', async () => {
+    const path = await script(`printf '%s\\n' 'plain line'
+printf '%s\\n' '::status phase=Linking progress=0.5 completed=2 total=3'
+printf '%s\\n' '::status progress=2'
+printf '%s\\n' '::status nope=1'
+printf '%s\\n' '::status detail="no-end'
+printf '%s\\n' '::status phase=FromErr detail="Waiting for Apple"' >&2
+`);
+    const r = new Runner({ root: temp, script: path });
+    const seen = [];
+    r.onChange = reason => { if (reason === 'status') seen.push({ ...r.statusSlot }); };
+    expect(await r.run([{ id: 'build', label: 'Build', args: ['build'] }])).toBe('done');
+    expect(seen.map(slot => slot.phase)).toContain('Linking');
+    expect(seen.find(slot => slot.phase === 'Linking')).toMatchObject({ progress: 0.5, completed: 2, total: 3 });
+    expect(seen.find(slot => slot.phase === 'FromErr').detail).toBe('Waiting for Apple');
+    expect(r.statusSlot).toBeNull();
+    const texts = r.logs.map(line => line.text);
+    expect(texts).toContain('plain line');
+    expect(texts).toContain('::status progress=2');
+    expect(texts).toContain('::status nope=1');
+    expect(texts).toContain('::status detail="no-end');
+    expect(texts.some(text => text.includes('phase=Linking') || text.includes('phase=FromErr'))).toBe(false);
+    r.log('::status phase=Keep');
+    expect(r.logs.at(-1).text).toBe('::status phase=Keep');
+    expect(r.statusSlot).toBeNull();
+  });
+
+  test('truncates phase and detail before comparing snapshots', () => {
+    const r = new Runner({ root: temp, script: 'unused' });
+    let marks = 0;
+    r.onChange = () => { marks++; };
+    r.status({ phase: 'p'.repeat(50), detail: 'd'.repeat(130) });
+    expect(r.statusSlot.phase).toHaveLength(40);
+    expect(r.statusSlot.detail).toHaveLength(120);
+    const heartbeat = r.statusSlot.heartbeatAt;
+    r.status({ phase: 'p'.repeat(80), detail: 'd'.repeat(200) });
+    expect(marks).toBe(1);
+    expect(r.statusSlot.heartbeatAt).toBe(heartbeat);
+  });
+
+  test('a progress fraction draws a bar on the running row and in the footer', () => {
+    const a = running({ phase: 'Link', detail: 'objects', progress: 2 / 3, completed: 2, total: 3 });
+    const screen = render(a, 110, 34, { color: false, now }).join('\n');
+    expect(screen).toContain('Link');
+    expect(screen).toContain('objects');
+    expect(screen).toContain('━');
+    expect(screen).toContain('2/3');
+    expect(screen).toContain('0/1 stages');
+    expect(screen).not.toContain(spinner(Math.floor(now / 90)));
+  });
+
+  test('null progress keeps the spinner and the phase', () => {
+    const a = running({ phase: 'Notarizing', detail: 'Waiting for Apple' });
+    const screen = render(a, 110, 34, { color: false, now }).join('\n');
+    expect(screen).toContain('Notarizing');
+    expect(screen).toContain('Waiting for Apple');
+    expect(screen).toContain(spinner(Math.floor(now / 90)));
+  });
+
+  test('reduced motion keeps the phase and the bar', () => {
+    const a = running({ phase: 'Link', progress: 0.5 });
+    a.motion = false;
+    const screen = render(a, 110, 34, { color: false, now }).join('\n');
+    expect(screen).toContain('Link');
+    expect(screen).toContain('━');
+    for (const glyph of glyphs) expect(screen).not.toContain(glyph);
+  });
+
+  test('a finished row returns to its duration label', () => {
+    const a = running({ phase: 'Link', progress: 1 });
+    a.runner.jobs[0].status = 'done';
+    a.runner.jobs[0].endedAt = now;
+    a.runner.statusSlot = null;
+    a.runner.running = false;
+    a.runner.result = 'done';
+    a.runner.endedAt = now;
+    const screen = render(a, 110, 34, { color: false, now }).join('\n');
+    expect(screen).toContain('complete  4s');
+    expect(screen).not.toContain('Link');
+  });
+
+  test('a quiet slot says work is still going', () => {
+    const a = running({ phase: 'Notarizing', detail: 'Waiting for Apple', progress: 0.4 });
+    a.runner.statusSlot.heartbeatAt = now - 15_000;
+    const screen = render(a, 110, 34, { color: false, now }).join('\n');
+    expect(screen).toContain('Notarizing');
+    expect(screen).toContain('Still working · last update 15s ago');
+    expect(screen).toContain('━');
+  });
+
+  test('demo build progress moves through the slot and stays out of the log', async () => {
+    const steps = demoSteps('build');
+    expect(steps.map(step => step.status.progress)).toEqual([1 / 3, 1 / 3, 2 / 3, 1]);
+    expect(steps.map(step => step.status.phase)).toEqual(['Compile', 'Compile', 'Link', 'Stage']);
+    const r = new Runner({ root: temp, script: 'unused', demo: true });
+    r.demoPace = 0;
+    const seen = [];
+    r.onChange = reason => { if (reason === 'status' && r.statusSlot) seen.push(r.statusSlot.progress); };
+    expect(await r.run([{ id: 'build', label: 'Build app', args: ['build'] }])).toBe('done');
+    expect(seen).toEqual([1 / 3, 2 / 3, 1]);
+    expect(r.logs.some(line => line.text.includes('Link HoldThis'))).toBe(true);
+    expect(r.logs.some(line => line.text.includes('::status'))).toBe(false);
+    expect(r.statusSlot).toBeNull();
   });
 });

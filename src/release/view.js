@@ -1,5 +1,6 @@
 import { STAGES, sameVersion, stepBlock, publishBlock } from './model.js';
 import { duration } from '../tui/format.js';
+import { STALE_AFTER_MS } from '../tui/runner.js';
 import { painter, fit, box, wrap, plain, bar, spinner, splitLine } from '../tui/terminal.js';
 import { dialog } from './dialogs.js';
 import { logLines } from '../tui/logs.js';
@@ -11,6 +12,17 @@ const good = a => ['present', 'verified'].includes(a.state);
 function stageState(app, stage, frame, now) {
   const job = app.runner.jobs.find(j => j.id === stage.id);
   if (job) {
+    if (job.status === 'running' && !app.runner.cancelled && app.runner.statusSlot) {
+      const slot = app.runner.statusSlot;
+      const caption = [slot.phase, slot.detail].filter(Boolean).join(' · ');
+      const determinate = typeof slot.progress === 'number';
+      if (caption || determinate) return {
+        icon: determinate || !app.motion ? '●' : spinner(frame),
+        tone: 'ice',
+        label: caption,
+        meter: determinate ? slot.progress : null,
+      };
+    }
     const status = { done: ['✓', 'mint', 'complete'], running: [app.motion ? spinner(frame) : '●', 'ice', app.runner.cancelled ? 'stopping' : 'working'], failed: ['×', 'red', 'failed'], cancelled: ['■', 'amber', 'stopped'], pending: ['○', 'muted', 'queued'] }[job.status];
     return { icon: status[0], tone: status[1], label: job.startedAt ? `${status[2]}  ${duration((job.endedAt || now) - job.startedAt)}` : status[2] };
   }
@@ -25,7 +37,7 @@ function pipeline(app, width, height, c, frame, now) {
   for (const stage of STAGES) {
     const state = stageState(app, stage, frame, now);
     lines.push(' ' + c(`${state.icon}  ${stage.label}`, state.tone, state.tone === 'ice'));
-    if (height >= 17) lines.push('    ' + c(state.label, 'muted'));
+    if (height >= 17) lines.push(state.meter == null ? '    ' + c(state.label, 'muted') : '    ' + bar(state.meter, 1, 8, c) + (state.label ? c(' ' + state.label, 'muted') : ''));
     if (spacious && stage.id !== 'checksums') lines.push('    ' + c('│', 'line'));
   }
   if (height >= 25) lines.push('', ' ' + c('Release mode', 'muted'), ' ' + c(app.signedOnly ? 'Signed only' : 'Notarize & staple', app.signedOnly ? 'amber' : 'mint'), ' ' + c('N to change', 'muted'));
@@ -133,9 +145,12 @@ export function render(app, columns, rows, { color = true, now = Date.now() } = 
   } else lines.push(...main);
   const progressWidth = Math.min(32, width - 26);
   const taskState = r.running ? `${r.cancelled ? 'Stopping' : live?.label || 'Finishing'}  ${duration(now - r.startedAt)}` : r.result ? `${r.result === 'done' ? '✓' : '■'} ${r.result}  ${duration(r.endedAt - r.startedAt)}` : 'No active task';
+  const slot = r.running && !r.cancelled ? r.statusSlot : null;
+  const stale = slot && now - slot.heartbeatAt >= STALE_AFTER_MS;
+  const slotNotice = slot && [slot.phase, stale ? `Still working · last update ${duration(now - slot.heartbeatAt)} ago` : slot.detail, Number.isInteger(slot.completed) && Number.isInteger(slot.total) ? `${slot.completed}/${slot.total}` : null, duration(now - r.startedAt)].filter(Boolean).join(' · ');
   const taskTone = r.result === 'failed' ? 'red' : r.result === 'done' ? 'mint' : 'ice';
   lines.push(splitLine(' ' + bar(done, r.jobs.length, progressWidth, c) + '  ' + c(r.jobs.length ? `${done}/${r.jobs.length} stages` : 'Ready', 'muted'), c(columns >= 100 ? taskState + ' ' : r.startedAt ? duration((r.endedAt || now) - r.startedAt) + ' ' : '', taskTone), width));
-  const notice = app.notice || (r.running ? taskState : app.refreshing ? 'Reading workspace and verifying checksums…' : app.tab === 2 ? (app.logFilter ? 'Filtered output · Esc clears the filter' : 'Output is retained for this session.') : `Checked ${stamp(app.refreshedAt)} · ${app.demo ? 'All release actions are simulated' : 'R refreshes files and checksums'}`);
+  const notice = app.notice || (r.running ? slotNotice || taskState : app.refreshing ? 'Reading workspace and verifying checksums…' : app.tab === 2 ? (app.logFilter ? 'Filtered output · Esc clears the filter' : 'Output is retained for this session.') : `Checked ${stamp(app.refreshedAt)} · ${app.demo ? 'All release actions are simulated' : 'R refreshes files and checksums'}`);
   const noticeRows = wrap(notice, width - 2);
   lines.push(...noticeRows.slice(0, 2).map((l, i) => ' ' + c(i === 1 && noticeRows.length > 2 ? fit(l, width - 4).trimEnd() + '…' : l, app.notice ? 'amber' : 'muted')));
   const hints = app.tab === 2 ? '↑↓ scroll  F filter  E save  End follow  Tab views' : app.tab === 1 ? '↑↓ select  Enter details  R refresh  Tab views' : app.screen === 'steps' ? '↑↓ select  Enter review  1–6 step  Esc back' : '↑↓ select  Enter review  Tab views  N mode  Q quit';

@@ -35,10 +35,10 @@ The code already splits terminal machinery from the product, but the product is 
 | `src/tui/terminal.js` | Palette, fit/wrap, boxes, spinner, progress bar. |
 | `src/tui/format.js` | Byte sizes and durations. |
 | `src/tui/logs.js` | Log viewport. Append-only wrap cache keyed by width and filter. A paused viewport keeps its anchor. The 2,500-line cap lives in the runner. |
-| `src/tui/runner.js` | Spawns `script/release.sh` with an argument list. Cancel is SIGTERM to the process group, then SIGKILL after three seconds. Demo output is a HoldThis message table. `status()` stores a latest-value slot and ignores an unchanged snapshot. |
+| `src/tui/runner.js` | Spawns `script/release.sh` with an argument list. Cancel is SIGTERM to the process group, then SIGKILL after three seconds. Demo output is a HoldThis message table, and demo steps also fill the status slot. Child `::status` lines update that slot and stay out of the transcript. |
 | `src/release/model.js` | `STAGES`, HoldThis artifact paths, version rules, `planRelease`, `stepBlock`, `publishBlock`, workspace inspect. |
 | `src/release/app.js` | Navigation, version form, publish's validate-then-upload gate, signed-only mode, resume, demo fact updates. |
-| `src/release/view.js` | Header, tabs, pipeline, artifacts, logs, progress. Knows stage ids, "6 files," and the staple line. |
+| `src/release/view.js` | Header, tabs, pipeline, artifacts, logs, progress. The running row and footer read the status slot. Knows stage ids, "6 files," and the staple line. |
 | `src/release/dialogs.js` | Palette, forms, help, confirmations. |
 | `src/release/repo.js` | GitHub `owner/repo` from `origin` or `RELEASETHIS_REPO`. |
 
@@ -63,7 +63,7 @@ Paint behavior worth keeping:
 - Log wrapping is append-only. A paused viewport keeps its anchor when new lines arrive.
 - `--no-motion`, `RELEASETHIS_REDUCED_MOTION=1`, `M`, and `NO_COLOR` already exist.
 
-Phase 1 has landed. The sampler is `src/tui/frame.js`. An identical status patch does not mark the frame dirty. The slot is not rendered yet: sentinel parsing and the live phase row are phase 2, and plugins stay quiet until that exists.
+Phase 1 has landed. The sampler is `src/tui/frame.js`. An identical status patch does not mark the frame dirty. Phase 2 has landed in `src/tui/runner.js` and `src/release/view.js`: child `::status` lines fill the slot, and the running row and footer read it.
 
 ## Target
 
@@ -177,9 +177,9 @@ Patches are not history. A patch that does not change visible text does not mark
 
 The frame clock samples both channels. While a task runs, paints happen at most once per 90ms tick. A keypress still paints on the next turn and never waits for a plugin. Elapsed time is read from the host clock during render. `render` does not call plugins.
 
-The running pipeline row and the footer bar read the same slot. A number draws a determinate bar. `null` keeps the spinner. After a quiet stretch with the process still alive, the host shows that work is ongoing and when the last status arrived, so a wait such as notarization does not look frozen. On completion the row collapses to its label and duration. Reduced motion still updates the phase text and the bar.
+The running pipeline row and the footer bar read the same slot. A number draws a determinate bar. `null` keeps the spinner. After 15 seconds with the process still alive, the footer keeps the phase and says work is still going, with the age of the last update, so a wait such as notarization does not look frozen. On completion the row collapses to its label and duration. Reduced motion still updates the phase text and the bar.
 
-Working proposal for shell tasks, lifted out of the child stream by the runner:
+Shell tasks report through this line, lifted out of the child stream by the runner:
 
 ```text
 ::status phase=Linking progress=0.66 completed=2 total=3
@@ -237,7 +237,7 @@ Plugins are trusted local modules. This plan does not add a sandbox, hot reload,
 Each phase leaves `bun run tui:demo` and the current tests behaving as they do now, except where the phase explicitly changes output. Check a phase when it has landed.
 
 - [x] **1. Make bursts cheap.** Split status dirtiness from log dirtiness. Coalesce runner updates onto the frame clock while a task is running. Wrap only new log lines. Ignore patches that do not change visible text. Exit when a synthetic flood of lines and status patches still paints once per frame, and a keypress does not wait on that flood. Landed in `src/tui/frame.js`, `src/tui/logs.js`, and `src/tui/runner.js`.
-- [ ] **2. Add the status slot to the current runner.** Parse the status sentinel in `runner.js`. Point the active pipeline row and the footer at the slot. Teach the demo stages to emit phases. Exit when a demo task shows a phase and, when it has a fraction, a moving bar, and sentinel lines do not appear in the log.
+- [x] **2. Add the status slot to the current runner.** Parse the status sentinel in `runner.js`. Point the active pipeline row and the footer at the slot. Teach the demo stages to emit phases. Exit when a demo task shows a phase and, when it has a fraction, a moving bar, and sentinel lines do not appear in the log. Landed in `src/tui/runner.js` and `src/release/view.js`.
 - [ ] **3. Turn the HoldThis cockpit into an in-repo profile.** Introduce facts, tasks, and plans as data. Move `STAGES`, artifact paths, `planRelease`, `stepBlock`, `publishBlock`, signed-only, and the publish gate behind that profile. The view renders tasks and facts. Exit when `view.js` and `app.js` no longer mention HoldThis paths or stage ids, and the existing keyboard, blocker, and pipeline tests pass against the profile.
 - [ ] **4. Load a profile from the repo being released.** Read the profile from the current working directory. Support command tasks, file artifacts, modes, plans, and confirm gates. A missing profile explains how to add one. Exit when a fixture repo with three declarative steps runs under demo and against a temp script, and the HoldThis demo still passes.
 - [ ] **5. Refresh without freezing.** Run independent probes concurrently, isolate a probe failure to its own facts, and stream checksums. Show probe progress through the status slot. Exit when a slow probe does not block `Q` or tab changes, and one failed probe leaves the other facts on screen.
@@ -281,12 +281,13 @@ Settled in the planning conversation on 2026-11-08.
 | The first profile must reproduce today's HoldThis flow. | That is the acceptance test of the host. |
 | Phases land in the order in the roadmap. | Burst handling before chatty plugins. In-repo profile before a public config format. |
 | Probes that declare disjoint fact keys run concurrently. | Phase 5 default. |
+| Status sentinels are `::status key=value` lines. | Double quotes hold spaces. `\"` and `\\` are the escapes. A malformed line is logged and does not fail the task. Sentinels stay out of the transcript. |
+| A running status slot is quiet after 15 seconds. | The footer keeps the phase and says work is still going, with the age of the last update. |
 
 ## Open questions
 
 1. Profile filename and format. Working proposal is `releasethis.config.js` from the cwd. Is a JSON or package.json form also required for repos that want no executable config?
-2. Status sentinel grammar. The `::status key=value` line is a working proposal. What should a value that contains spaces look like, and should a debug flag echo sentinels into the log?
-3. Stale-status threshold. Working proposal is on the order of 15 seconds. Should the profile be able to override it for long quiet tasks?
+3. Stale-status threshold. The host uses 15 seconds. Should a profile be able to override it for long quiet tasks?
 4. Task id scheme. Working proposal is short ids inside a profile (`sign`, `zip`) with the profile as the namespace, so two profiles can both have a `build` task.
 5. Sidebar grouping. Do zip and package render as a packaging group, or as six flat rows matching today?
 6. Declarative status parsing. Is the sentinel the only supported channel for command tasks, or can a profile also name a single line pattern for tools that already print `40%`?
