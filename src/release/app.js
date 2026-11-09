@@ -47,6 +47,10 @@ export class App {
     };
   }
   formPlan() { return Object.values(this.profile.plans).find(plan => plan.kind === 'form'); }
+  activeFormPlan(modal = this.modal) {
+    const plan = modal?.planId ? this.profile.plans[modal.planId] : null;
+    return plan?.kind === 'form' ? plan : this.formPlan();
+  }
   gatedPlan() { return Object.values(this.profile.plans).find(plan => plan.kind === 'gated'); }
   homeActions() { return this.profile.actions.filter(action => action.home); }
 
@@ -75,12 +79,13 @@ export class App {
     if (this.runner.running) return this.notify('Wait for the active task, or cancel it with Ctrl+C.');
     if (!this.facts) return this.notify('Workspace is not ready. Press R to retry.');
     const defaults = openingParams(plan, this.facts);
-    this.modal = { type: 'release', ...defaults, field: 0, cursor: String(defaults.version).length, error: '', preset: 0 };
+    const first = plan.fields[0];
+    this.modal = { type: 'release', planId: plan.id, ...defaults, field: 0, cursor: String(defaults[first.name] ?? '').length, error: '', preset: 0 };
   }
 
   reviewRelease() {
     const draft = { ...this.modal };
-    const plan = this.formPlan();
+    const plan = this.activeFormPlan(draft);
     const params = {};
     for (const field of plan.fields) params[field.name] = String(draft[field.name] ?? '').trim();
     const ctx = this.context(params);
@@ -167,12 +172,11 @@ export class App {
   }
 
   applyPreset() {
-    const plan = this.formPlan();
+    const plan = this.activeFormPlan();
     const modal = this.modal;
     modal.preset = ((modal.preset ?? 0) + 1) % plan.presets.length;
-    const next = plan.presets[modal.preset].apply(this.facts);
-    modal.version = next.version;
-    modal.build = next.build;
+    const next = plan.presets[modal.preset].apply(this.facts) || {};
+    for (const field of plan.fields) if (Object.hasOwn(next, field.name)) modal[field.name] = next[field.name];
     const field = plan.fields[modal.field] || plan.fields[0];
     modal.cursor = String(modal[field.name] ?? '').length;
     modal.error = '';
@@ -191,7 +195,7 @@ export class App {
       this.preflightReady = false;
       return this.publish();
     }
-    if (jobs[0].resume === 'reopen-form') return this.newRelease();
+    if (jobs[0].resume === 'reopen-form') return this.openForm(plan || this.formPlan());
     const signedOnly = this.runSignedOnly;
     const completed = this.runner.jobs.filter(job => job.status === 'done');
     const mode = this.profile.mode;
@@ -374,23 +378,30 @@ export class App {
     }
     if (m.type === 'release') {
       if (key.name === 'f2') return this.applyPreset();
-      const fields = this.formPlan().fields;
-      const field = m.field === 0 ? fields[0].name : fields[1].name;
-      const moveField = next => { m.field = (next + 3) % 3; m.cursor = String(m.field === 0 ? m.version : m.build).length; };
+      const fields = this.activeFormPlan().fields;
+      const count = fields.length + 1;
+      const moveField = next => {
+        m.field = (next % count + count) % count;
+        const descriptor = fields[m.field];
+        if (descriptor) m.cursor = String(m[descriptor.name] ?? '').length;
+      };
       if (key.name === 'tab') return moveField(m.field + (key.shift ? -1 : 1));
-      if (key.name === 'return') return m.field === 2 ? this.reviewRelease() : moveField(m.field + 1);
+      if (key.name === 'return') return m.field === fields.length ? this.reviewRelease() : moveField(m.field + 1);
       if (key.name === 'up') return moveField(m.field - 1);
       if (key.name === 'down') return moveField(m.field + 1);
-      if (m.field === 2) return;
+      const descriptor = fields[m.field];
+      if (!descriptor) return;
+      const name = descriptor.name;
+      const value = () => String(m[name] ?? '');
       m.error = '';
-      if (key.ctrl && key.name === 'u') { m[field] = ''; m.cursor = 0; m.preset = -1; }
+      if (key.ctrl && key.name === 'u') { m[name] = ''; m.cursor = 0; m.preset = -1; }
       else if (key.name === 'left') m.cursor = Math.max(0, m.cursor - 1);
-      else if (key.name === 'right') m.cursor = Math.min(m[field].length, m.cursor + 1);
+      else if (key.name === 'right') m.cursor = Math.min(value().length, m.cursor + 1);
       else if (key.name === 'home') m.cursor = 0;
-      else if (key.name === 'end') m.cursor = m[field].length;
-      else if (key.name === 'backspace' && m.cursor > 0) { m[field] = m[field].slice(0, m.cursor - 1) + m[field].slice(m.cursor); m.cursor--; m.preset = -1; }
-      else if (key.name === 'delete') { m[field] = m[field].slice(0, m.cursor) + m[field].slice(m.cursor + 1); m.preset = -1; }
-      else if (!key.ctrl && !key.meta && text && /^[\d.]+$/.test(text) && m[field].length + text.length <= 40) { m[field] = m[field].slice(0, m.cursor) + text + m[field].slice(m.cursor); m.cursor += text.length; m.preset = -1; }
+      else if (key.name === 'end') m.cursor = value().length;
+      else if (key.name === 'backspace' && m.cursor > 0) { m[name] = value().slice(0, m.cursor - 1) + value().slice(m.cursor); m.cursor--; m.preset = -1; }
+      else if (key.name === 'delete') { m[name] = value().slice(0, m.cursor) + value().slice(m.cursor + 1); m.preset = -1; }
+      else if (!key.ctrl && !key.meta && text && /^[\d.]+$/.test(text) && value().length + text.length <= 40) { m[name] = value().slice(0, m.cursor) + text + value().slice(m.cursor); m.cursor += text.length; m.preset = -1; }
     }
   }
 

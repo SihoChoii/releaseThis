@@ -21,7 +21,7 @@ export function dialog(app, width, maxHeight, c) {
     footer = [' ' + c(`${matches.length ? m.index + 1 : 0}/${matches.length}   ↑ ↓ select   Enter run   Esc close`, 'muted')];
   } else if (m.type === 'release') {
     title = 'New release';
-    const plan = app.formPlan();
+    const plan = app.activeFormPlan(m);
     const field = (label, value, index) => {
       const selected = m.field === index;
       const available = width - 19;
@@ -31,10 +31,10 @@ export function dialog(app, width, maxHeight, c) {
       return selected ? c.selected(fit(row, width - 3), width - 2) : c(row);
     };
     body = [' ' + c(`F2 preset: ${plan.presets[m.preset]?.name || 'Custom'}`, 'ice'), '',
-      field(plan.fields[0].label, m[plan.fields[0].name], 0), field(plan.fields[1].label, m[plan.fields[1].name], 1), '',
+      ...plan.fields.map((descriptor, index) => field(descriptor.label, String(m[descriptor.name] ?? ''), index)), '',
       ...wrap(plan.hint(app.context()), width - 4).map(l => ' ' + c(l, app.signedOnly ? 'amber' : 'muted')),
       ...wrap(m.error || plan.help, width - 4).map(l => ' ' + c(l, m.error ? 'red' : 'muted'))];
-    footer = [m.field === 2 ? c.selected(` ❯ ${plan.submit}`, width - 2) : c(`   ${plan.submit}`, 'ink', true),
+    footer = [m.field === plan.fields.length ? c.selected(` ❯ ${plan.submit}`, width - 2) : c(`   ${plan.submit}`, 'ink', true),
       ' ' + c('Tab next   Ctrl+U clear   Enter next   Esc close', 'muted')];
   } else if (m.type === 'filter') {
     title = 'Filter log output';

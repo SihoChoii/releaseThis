@@ -651,3 +651,156 @@ describe('single-step skip declarations', () => {
     expect(screen).not.toContain('Enter to review this step');
   });
 });
+
+describe('selected form plan', () => {
+  function otherProfile() {
+    const other = {
+      id: 'other',
+      kind: 'form',
+      title: 'Other pipeline',
+      fields: holdthis.plans.release.fields,
+      presets: holdthis.plans.release.presets,
+      help: 'Other help',
+      submit: 'Review other →',
+      hint: () => 'Other hint',
+      validate: () => '',
+      review: () => ({ title: 'Other review', lines: ['Just the other task'], accept: 'Simulate other' }),
+      resolve: () => [{ id: 'other-task', label: 'Other task', args: ['other'], detail: 'Only the other workflow', display: './script/release.sh other', demo: [{ text: 'Other simulated' }], resume: 'reopen-form' }],
+    };
+    return {
+      ...holdthis,
+      plans: { ...holdthis.plans, other },
+      actions: [...holdthis.actions, {
+        id: 'other', plan: 'other', bindings: [{ key: '4' }],
+        label: 'Other workflow', detail: 'Run the other plan',
+        palette: 'Other workflow', paletteHint: '4', paletteDetail: 'Run the other plan',
+        helpKey: '4', help: 'Other workflow',
+      }],
+    };
+  }
+
+  test('review and execution keep the selected form plan', async () => {
+    const a = new App({ root: temp, demo: true, profile: otherProfile() });
+    a.workspace = holdthis.demoWorkspace();
+    a.runner.demoPace = 0;
+    a.key('4', key('4'));
+    expect(a.modal.planId).toBe('other');
+    for (let i = 0; i < 3; i++) a.key('', key('return'));
+    expect(a.modal.title).toBe('Other review');
+    a.modal.choice = 1;
+    a.key('', key('return'));
+    while (a.runner.running) await Bun.sleep(0);
+    expect(a.runner.session.planId).toBe('other');
+    expect(a.runner.jobs.map(job => job.id)).toEqual(['other-task']);
+    expect(a.runner.result).toBe('done');
+  });
+
+  test('the default release action still records the release plan', async () => {
+    const a = app();
+    a.runner.demoPace = 0;
+    a.key('1', key('1'));
+    expect(a.modal.planId).toBe('release');
+    for (let i = 0; i < 3; i++) a.key('', key('return'));
+    expect(a.modal.title).toBe('Review release');
+    a.modal.choice = 1;
+    a.key('', key('return'));
+    while (a.runner.running) await Bun.sleep(0);
+    expect(a.runner.session.planId).toBe('release');
+    expect(a.runner.jobs.map(job => job.id)).toContain('build');
+  });
+
+  test('an interrupted form reopens the plan that was running', () => {
+    const a = new App({ root: temp, demo: true, profile: otherProfile() });
+    a.workspace = holdthis.demoWorkspace();
+    a.runner.result = 'failed';
+    a.runner.session = { planId: 'other' };
+    a.runner.jobs = [{ id: 'other-task', label: 'Other task', status: 'failed', resume: 'reopen-form', args: ['other'] }];
+    a.retry();
+    expect(a.modal.type).toBe('release');
+    expect(a.modal.planId).toBe('other');
+  });
+});
+
+describe('parameter schema form', () => {
+  function formApp(fields, presets) {
+    const release = {
+      ...holdthis.plans.release,
+      fields,
+      presets,
+      validate: () => '',
+      review: (ctx) => ({ title: 'Review custom', lines: [JSON.stringify(ctx.params)], accept: 'Simulate release' }),
+      resolve: () => [{ id: 'custom-task', label: 'Custom', args: ['custom'], detail: 'Custom', display: 'custom', demo: [{ text: 'Custom' }] }],
+    };
+    const profile = { ...holdthis, plans: { ...holdthis.plans, release } };
+    const a = new App({ root: temp, demo: true, profile });
+    a.workspace = holdthis.demoWorkspace();
+    return a;
+  }
+
+  test('renders a single integer field', () => {
+    const a = formApp(
+      [{ name: 'build', type: 'integer', label: 'Build' }],
+      [{ name: 'Default', opening: true, apply: () => ({ build: '9' }) }],
+    );
+    a.newRelease();
+    const screen = render(a, 110, 34, { color: false }).join('\n');
+    expect(screen).toContain('Build');
+    expect(screen).toContain('9');
+    expect(a.modal.planId).toBe('release');
+    expect(a.modal.field).toBe(0);
+    a.key('', key('tab'));
+    expect(a.modal.field).toBe(1);
+  });
+
+  test('tabs through a third field before submit and edits it by name', () => {
+    const a = formApp(
+      [
+        { name: 'version', type: 'semver', label: 'Version' },
+        { name: 'build', type: 'integer', label: 'Build' },
+        { name: 'attempts', type: 'integer', label: 'Attempts' },
+      ],
+      [{ name: 'Default', opening: true, apply: () => ({ version: '1.2.3', build: '4', attempts: '2' }) }],
+    );
+    a.newRelease();
+    const screen = render(a, 110, 34, { color: false }).join('\n');
+    expect(screen).toContain('Attempts');
+    a.key('', key('tab'));
+    a.key('', key('tab'));
+    expect(a.modal.field).toBe(2);
+    a.key('', { name: 'u', ctrl: true });
+    a.key('7', {});
+    expect(a.modal.attempts).toBe('7');
+    a.key('', key('tab'));
+    expect(a.modal.field).toBe(3);
+    a.key('', key('tab'));
+    expect(a.modal.field).toBe(0);
+    a.key('', { name: 'tab', shift: true });
+    expect(a.modal.field).toBe(3);
+  });
+
+  test('presets and editing use renamed fields', () => {
+    const a = formApp(
+      [
+        { name: 'channel', type: 'integer', label: 'Channel' },
+        { name: 'serial', type: 'integer', label: 'Serial' },
+      ],
+      [
+        { name: 'Low', opening: true, apply: () => ({ channel: '1', serial: '2' }) },
+        { name: 'High', apply: () => ({ channel: '8', serial: '9' }) },
+      ],
+    );
+    a.newRelease();
+    expect(a.modal.channel).toBe('1');
+    expect(a.modal.serial).toBe('2');
+    a.key('', key('f2'));
+    expect(a.modal.channel).toBe('8');
+    expect(a.modal.serial).toBe('9');
+    expect(a.modal.version).toBeUndefined();
+    a.key('', { name: 'u', ctrl: true });
+    a.key('3', {});
+    expect(a.modal.channel).toBe('3');
+    a.key('', key('tab'));
+    a.key('4', {});
+    expect(a.modal.serial).toBe('94');
+  });
+});
