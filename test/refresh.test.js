@@ -1,12 +1,12 @@
 import { test, expect, describe, beforeEach, afterEach } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { App } from '../src/release/app.js';
 import { render } from '../src/release/view.js';
-import { checksumOK } from '../src/profiles/holdthis.js';
-import { factStore } from '../src/workflow/model.js';
+import { checksumOK, holdthis } from '../src/profiles/holdthis.js';
+import { factStore, resolvePlan } from '../src/workflow/model.js';
 import { abortError, refreshFacts, verifyChecksum } from '../src/workflow/refresh.js';
 
 let temp;
@@ -17,6 +17,36 @@ function deferred() {
   let release;
   const promise = new Promise(resolve => { release = resolve; });
   return { promise, release };
+}
+
+function palette(app, query) {
+  app.key('/', {});
+  app.key(query, {});
+  app.key('', { name: 'return' });
+}
+
+function holdthisWithEnv(env) {
+  return {
+    ...holdthis,
+    probes: holdthis.probes.map(probe => ({ ...probe, run: ctx => probe.run({ ...ctx, env }) })),
+  };
+}
+
+async function executable(name, source) {
+  const file = join(temp, name);
+  await writeFile(file, `#!${process.execPath}\n${source}`);
+  await chmod(file, 0o755);
+  return file;
+}
+
+async function within(promise, milliseconds) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Timed out waiting for probe processes.')), milliseconds); }),
+    ]);
+  } finally { clearTimeout(timer); }
 }
 
 function shell(probes, extra = {}) {
@@ -52,6 +82,80 @@ function shell(probes, extra = {}) {
 }
 
 describe('probe waves', () => {
+  test('abort preserves completed probes and discards a late result', async () => {
+    const inside = deferred();
+    const gate = deferred();
+    const controller = new AbortController();
+    const pending = refreshFacts({ signal: controller.signal, profile: shell([
+      { id: 'fast', facts: ['fast'], run({ facts }) { facts.set({ key: 'fast', value: true }); } },
+      {
+        id: 'late', facts: ['late'],
+        async run({ facts }) {
+          inside.release();
+          await gate.promise;
+          facts.set({ key: 'late', value: true });
+        },
+      },
+    ]) });
+    await inside.promise;
+    controller.abort();
+    gate.release();
+    const result = await pending;
+    expect(result.aborted).toBe(true);
+    expect(result.failures).toEqual([]);
+    expect(result.facts.get('fast')?.value).toBe(true);
+    expect(result.facts.get('late')).toBeNull();
+  });
+
+  test('nested mutations by a failed probe cannot reach input facts or a sibling', async () => {
+    const entry = {
+      key: 'keep', value: { nested: { ok: true }, items: [{ count: 1 }] },
+      provenance: { source: 'probe', details: { trusted: true } },
+      explain: { present: ['original'] },
+    };
+    const seed = structuredClone(entry);
+    const facts = factStore([entry]);
+    const result = await refreshFacts({ facts, profile: shell([
+      {
+        id: 'bad', facts: ['keep'],
+        run({ facts }) {
+          const fact = facts.get('keep');
+          fact.value.nested.ok = false;
+          fact.value.items[0].count = 2;
+          fact.provenance.details.trusted = false;
+          fact.explain.present.push('wrong');
+          throw new Error('boom');
+        },
+      },
+      {
+        id: 'sibling', facts: ['observed'],
+        run({ facts }) { facts.set({ key: 'observed', value: facts.get('keep') }); },
+      },
+    ]) });
+    expect(result.failures.map(failure => failure.id)).toEqual(['bad']);
+    expect(facts.get('keep')).toEqual(seed);
+    expect(result.facts.get('keep')).toEqual(seed);
+    expect(result.facts.get('observed').value).toEqual(seed);
+  });
+
+  test('successful probes can only publish owned nested updates', async () => {
+    const facts = factStore([
+      { key: 'owned', value: { items: [{ count: 1 }] } },
+      { key: 'other', value: { items: [{ count: 1 }] } },
+    ]);
+    const result = await refreshFacts({ facts, profile: shell([{
+      id: 'update', facts: ['owned'],
+      run({ facts }) {
+        facts.get('owned').value.items[0].count = 2;
+        facts.get('other').value.items[0].count = 99;
+      },
+    }]) });
+    expect(result.facts.get('owned').value.items[0].count).toBe(2);
+    expect(result.facts.get('other').value.items[0].count).toBe(1);
+    expect(facts.get('owned').value.items[0].count).toBe(1);
+    expect(facts.get('other').value.items[0].count).toBe(1);
+  });
+
   test('disjoint probes run together and overlapping probes wait', async () => {
     const gate = deferred();
     const inside = deferred();
@@ -116,6 +220,66 @@ describe('probe waves', () => {
 });
 
 describe('interactive refresh', () => {
+  test('palette execution, retries, and previously opened confirmations wait for refresh', async () => {
+    const gate = deferred();
+    const inside = deferred();
+    const app = new App({ root: temp, profile: {
+      ...holdthis,
+      plans: { ...holdthis.plans, check: {
+        id: 'check', kind: 'run', resolve: () => [], review: () => ({ title: 'Check', lines: [], accept: 'Run' }),
+      } },
+      actions: [...holdthis.actions, { id: 'check', home: true, plan: 'check', palette: 'Check workspace', label: 'Check' }],
+      probes: [{ id: 'slow', facts: ['slow'], async run() { inside.release(); await gate.promise; } }],
+    } });
+    app.facts = holdthis.demoFacts();
+    app.selectStep();
+    const priorConfirmation = app.modal.callback;
+    app.modal = null;
+    const pending = app.refresh();
+    await inside.promise;
+    try {
+      for (const query of ['Step: Build app', 'New release', 'Publish release', 'Check workspace', 'Resume interrupted task']) {
+        palette(app, query);
+        expect(app.modal).toBeNull();
+        expect(app.notice).toContain('refresh');
+        expect(app.runner.running).toBe(false);
+      }
+      app.runner.result = 'paused';
+      palette(app, 'Continue paused plan');
+      expect(app.modal).toBeNull();
+      expect(app.notice).toContain('refresh');
+      await priorConfirmation();
+      expect(app.runner.jobs).toEqual([]);
+      expect(app.runner.running).toBe(false);
+      palette(app, 'Show artifacts');
+      expect(app.tab).toBe(1);
+    } finally {
+      gate.release();
+      await pending;
+    }
+    palette(app, 'Step: Build app');
+    expect(app.modal.type).toBe('confirm');
+  });
+
+  test('a form opened before refresh cannot be submitted while probes run', async () => {
+    const gate = deferred();
+    const inside = deferred();
+    const app = new App({ root: temp, profile: {
+      ...holdthis,
+      probes: [{ id: 'slow', facts: ['slow'], async run() { inside.release(); await gate.promise; } }],
+    } });
+    app.facts = holdthis.demoFacts();
+    app.newRelease();
+    const pending = app.refresh();
+    await inside.promise;
+    try {
+      app.reviewRelease();
+      expect(app.modal.type).toBe('release');
+      expect(app.notice).toContain('refresh');
+      expect(app.runner.running).toBe(false);
+    } finally { gate.release(); await pending; }
+  });
+
   test('a slow probe does not block tab or quit', async () => {
     const inside = deferred();
     const profile = shell([{
@@ -195,6 +359,94 @@ describe('interactive refresh', () => {
     expect(frame).toContain('━');
     expect(frame).toContain('Ready');
   });
+});
+
+describe('HoldThis partial refresh', () => {
+  test.each(['missing', 'invalid'])('%s source data blocks the form and recovers after repair', async state => {
+    const buddy = await executable('plist-buddy', `
+import { readFileSync } from 'node:fs';
+const value = JSON.parse(readFileSync(process.argv.at(-1), 'utf8'));
+console.log(process.argv[3].endsWith('CFBundleVersion') ? value.build : value.version);
+`);
+    await mkdir(join(temp, 'Resources'));
+    if (state === 'invalid') await writeFile(join(temp, 'Resources/Info.plist'), JSON.stringify({ version: 'invalid', build: '4' }));
+    const app = new App({ root: temp, profile: holdthisWithEnv({ ...process.env, HOLDTHIS_PLIST_BUDDY: buddy }) });
+    await app.refresh();
+    expect(app.notice).toContain('Probe "version.source" failed');
+    expect(app.facts.get('artifact.app.built').state).toBe('missing');
+    expect(() => app.key('1', { name: '1' })).not.toThrow();
+    expect(app.modal).toBeNull();
+    expect(app.notice).toContain('Source version');
+    palette(app, 'New release');
+    expect(app.modal).toBeNull();
+    expect(app.notice).toContain('Source version');
+    expect(() => resolvePlan(holdthis.plans.release, app.context({ version: '1.2.3', build: '4' }))).toThrow('Source version');
+    expect(render(app, 110, 34, { color: false }).join('\n')).toContain('Source version');
+    expect(app.runner.running).toBe(false);
+    await writeFile(join(temp, 'Resources/Info.plist'), JSON.stringify({ version: '1.2.3', build: '4' }));
+    await app.refresh();
+    expect(app.notice).toBe('');
+    app.key('1', { name: '1' });
+    expect(app.modal).toMatchObject({ type: 'release', version: '1.2.3', build: '4' });
+    app.key('', { name: 'escape' });
+    palette(app, 'New release');
+    expect(app.modal.type).toBe('release');
+  });
+});
+
+describe('HoldThis subprocess cancellation', () => {
+  for (const quit of ['q', 'ctrl+c', 'SIGINT', 'SIGTERM']) {
+    test(`${quit} stops plist and stapler children and exits the runtime`, async () => {
+      const pidsDir = join(temp, 'pids');
+      await mkdir(pidsDir);
+      await mkdir(join(temp, 'dist/release/HoldThis.app'), { recursive: true });
+      const helper = `
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+writeFileSync(join(process.env.PROBE_PID_DIR, process.pid + '.pid'), String(process.pid));
+setInterval(() => {}, 1000);
+`;
+      const buddy = await executable('plist-buddy', helper);
+      await executable('xcrun', helper);
+      const runtime = join(temp, 'cockpit.js');
+      await writeFile(runtime, `
+import { App } from ${JSON.stringify(new URL('../src/release/app.js', import.meta.url).href)};
+import { holdthis } from ${JSON.stringify(new URL('../src/profiles/holdthis.js', import.meta.url).href)};
+import { runCockpit } from ${JSON.stringify(new URL('../src/tui/runtime.js', import.meta.url).href)};
+process.stdin.setRawMode = () => {};
+await runCockpit({
+  createApp: callbacks => new App({ root: process.cwd(), profile: holdthis, ...callbacks }),
+  render: () => ['Workspace'],
+});
+`);
+      const proc = Bun.spawn([process.execPath, runtime], {
+        cwd: temp,
+        env: { ...process.env, HOLDTHIS_PLIST_BUDDY: buddy, PATH: `${temp}:${process.env.PATH}`, PROBE_PID_DIR: pidsDir },
+        stdin: 'pipe', stdout: 'pipe', stderr: 'pipe',
+      });
+      try {
+        const deadline = Date.now() + 3000;
+        while ((await readdir(pidsDir)).length < 5) {
+          if (Date.now() >= deadline) throw new Error('Timed out waiting for all five probe processes to start.');
+          await new Promise(resolve => setTimeout(resolve, 20));
+        }
+        if (quit === 'q' || quit === 'ctrl+c') proc.stdin.write(quit === 'q' ? 'q' : '\x03');
+        else proc.kill(quit);
+        expect(await within(proc.exited, 2000)).toBe(quit.startsWith('SIG') ? 130 : 0);
+        expect(await new Response(proc.stderr).text()).toBe('');
+        const pids = await Promise.all((await readdir(pidsDir)).map(async file => Number(await readFile(join(pidsDir, file), 'utf8'))));
+        expect(pids).toHaveLength(5);
+        for (const pid of pids) expect(() => process.kill(pid, 0)).toThrow();
+      } finally {
+        proc.kill('SIGKILL');
+        await proc.exited;
+        for (const file of await readdir(pidsDir)) {
+          const pid = Number(await readFile(join(pidsDir, file), 'utf8'));
+          try { process.kill(pid, 'SIGKILL'); } catch {}
+        }
+      }
+    }, 10000);
+  }
 });
 
 describe('streaming checksums', () => {

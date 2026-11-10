@@ -113,9 +113,16 @@ export class App {
     this.modal = { type: 'confirm', title, lines, action, callback, danger, choice: 0, scroll: 0 };
   }
 
+  canStartAction() {
+    const message = this.refreshing ? 'Wait for the workspace refresh to finish.'
+      : this.runner.running ? 'Wait for the active task, or cancel it with Ctrl+C.' : '';
+    if (message) this.notify(message);
+    return !message;
+  }
+
   newRelease() { return this.openForm(this.formPlan()); }
   openRun(plan) {
-    if (this.runner.running) return this.notify('Wait for the active task, or cancel it with Ctrl+C.');
+    if (!this.canStartAction()) return;
     if (!plan) return;
     if (!this.facts) return this.notify('Workspace is not ready. Press R to retry.');
     if (this.canContinue(plan)) return this.continuePlan();
@@ -131,16 +138,19 @@ export class App {
     } catch (error) { this.notify(error.message); }
   }
   openForm(plan) {
-    if (this.runner.running) return this.notify('Wait for the active task, or cancel it with Ctrl+C.');
+    if (!this.canStartAction()) return;
     if (!plan) return;
     if (!this.facts) return this.notify('Workspace is not ready. Press R to retry.');
     if (this.canContinue(plan)) return this.continuePlan();
-    const defaults = openingParams(plan, this.facts);
-    const first = plan.fields[0];
-    this.modal = { type: 'release', planId: plan.id, ...defaults, field: 0, cursor: String(defaults[first.name] ?? '').length, error: '', preset: 0 };
+    try {
+      const defaults = openingParams(plan, this.facts);
+      const first = plan.fields[0];
+      this.modal = { type: 'release', planId: plan.id, ...defaults, field: 0, cursor: String(defaults[first.name] ?? '').length, error: '', preset: 0 };
+    } catch (error) { this.notify(error.message); }
   }
 
   reviewRelease() {
+    if (!this.canStartAction()) return;
     const draft = { ...this.modal };
     const plan = this.activeFormPlan(draft);
     const params = {};
@@ -161,7 +171,7 @@ export class App {
   }
 
   async start(jobs, after, completed = [], session = null) {
-    if (this.runner.running) return;
+    if (!this.canStartAction()) return;
     if (!jobs.length) return this.notify('Nothing to run.');
     this.modal = null;
     this.tab = 2;
@@ -201,7 +211,7 @@ export class App {
   }
 
   selectStep() {
-    if (this.runner.running) return this.notify('Wait for the active task, or cancel it with Ctrl+C.');
+    if (!this.canStartAction()) return;
     const task = this.profile.catalog[this.selection];
     if (!task) return;
     if (!this.facts) return this.notify('Workspace is not ready. Press R to retry.');
@@ -217,7 +227,7 @@ export class App {
 
   publish() { return this.openGated(this.gatedPlan()); }
   openGated(plan) {
-    if (this.runner.running) return this.notify('Wait for the active task, or cancel it with Ctrl+C.');
+    if (!this.canStartAction()) return;
     if (!plan) return;
     if (!this.facts) return this.notify('Workspace is not ready. Press R to retry.');
     const blocked = plan.blocked(this.context());
@@ -235,6 +245,7 @@ export class App {
   }
 
   continuePlan() {
+    if (!this.canStartAction()) return;
     const session = this.runner.session;
     const plan = this.profile.plans[session?.planId];
     if (!this.canContinue()) {
@@ -264,15 +275,18 @@ export class App {
   applyPreset() {
     const plan = this.activeFormPlan();
     const modal = this.modal;
-    modal.preset = ((modal.preset ?? 0) + 1) % plan.presets.length;
-    const next = plan.presets[modal.preset].apply(this.facts) || {};
-    for (const field of plan.fields) if (Object.hasOwn(next, field.name)) modal[field.name] = next[field.name];
-    const field = plan.fields[modal.field] || plan.fields[0];
-    modal.cursor = String(modal[field.name] ?? '').length;
-    modal.error = '';
+    try {
+      modal.preset = ((modal.preset ?? 0) + 1) % plan.presets.length;
+      const next = plan.presets[modal.preset].apply(this.facts) || {};
+      for (const field of plan.fields) if (Object.hasOwn(next, field.name)) modal[field.name] = next[field.name];
+      const field = plan.fields[modal.field] || plan.fields[0];
+      modal.cursor = String(modal[field.name] ?? '').length;
+      modal.error = '';
+    } catch (error) { modal.error = error.message; }
   }
 
   retry() {
+    if (!this.canStartAction()) return;
     if (this.runner.result === 'paused') return this.continuePlan();
     if (this.runner.running || !['failed', 'cancelled'].includes(this.runner.result)) return this.notify('No interrupted task to resume.');
     const jobs = this.runner.jobs.filter(job => job.status !== 'done').map(job => ({

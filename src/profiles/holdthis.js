@@ -28,8 +28,14 @@ const step = (text, status) => ({ text, status });
 const nextPatch = version => version.replace(/\d+$/, n => String(BigInt(n) + 1n));
 const nextBuild = build => String(BigInt(build) + 1n);
 
+function sourceVersion(facts) {
+  const source = facts?.get('version.source')?.value;
+  if (!source) throw new Error('Source version is unavailable. Fix Info.plist, then press R to refresh.');
+  return source;
+}
+
 function bump(facts, index) {
-  const source = facts.get('version.source').value;
+  const source = sourceVersion(facts);
   const parts = source.version.split('.').map(BigInt);
   parts[index] += 1n;
   for (let i = index + 1; i < parts.length; i++) parts[i] = 0n;
@@ -37,7 +43,7 @@ function bump(facts, index) {
 }
 
 function suggested(facts) {
-  const source = facts.get('version.source').value;
+  const source = sourceVersion(facts);
   const built = facts.get('version.built')?.value;
   const checksums = facts.all().filter(fact => fact.kind === 'checksum');
   const complete = sameVersion(source, built) && checksums.length > 0 && checksums.every(fact => fact.state === 'verified');
@@ -89,7 +95,7 @@ const sign = stage('sign', 'Sign app', 'Developer ID and hardened runtime', {
     step('Verifying hardened runtime', { phase: 'Verifying' }),
   ],
   applyDemo(facts) {
-    const source = facts.get('version.source').value;
+    const source = sourceVersion(facts);
     const built = facts.get('version.built');
     built.value = { version: source.version, build: source.build };
     built.state = 'present';
@@ -168,7 +174,7 @@ const version = {
   detail: 'Write the release version into the source tree',
   resume: 'reopen-form',
   args(ctx) {
-    const source = ctx.facts.get('version.source').value;
+    const source = sourceVersion(ctx.facts);
     const { version: next, build } = ctx.params;
     return ['version', next, ...(build === source.build ? ['--keep-build'] : ['--build', build])];
   },
@@ -254,10 +260,10 @@ export function demoWorkspace() {
   return project(demoFacts());
 }
 
-async function plistVersion(path, env) {
+async function plistVersion(path, env, signal) {
   const buddy = env.HOLDTHIS_PLIST_BUDDY || '/usr/libexec/PlistBuddy';
   const values = await Promise.all(['CFBundleShortVersionString', 'CFBundleVersion'].map(async key =>
-    (await exec(buddy, ['-c', `Print :${key}`, path], { timeout: 10000 })).stdout.trim()));
+    (await exec(buddy, ['-c', `Print :${key}`, path], { timeout: 10000, env, signal })).stdout.trim()));
   if (!fieldTypes.semver(values[0]) || !fieldTypes.integer(values[1])) throw new Error('Invalid version in Info.plist');
   return { version: values[0], build: values[1] };
 }
@@ -273,8 +279,8 @@ const probes = [
   {
     id: 'version.source',
     facts: ['version.source'],
-    async run({ root, facts, env }) {
-      const source = await plistVersion(env?.HOLDTHIS_INFO_PLIST || join(root, 'Resources/Info.plist'), env || process.env);
+    async run({ root, facts, env, signal }) {
+      const source = await plistVersion(env?.HOLDTHIS_INFO_PLIST || join(root, 'Resources/Info.plist'), env || process.env, signal);
       facts.set({
         key: 'version.source', role: 'source-version', value: source, state: 'present',
         provenance: { source: 'probe', id: 'version.source' },
@@ -284,8 +290,11 @@ const probes = [
   {
     id: 'version.built',
     facts: ['version.built'],
-    async run({ root, facts, env }) {
-      const built = await plistVersion(join(root, 'dist/release/HoldThis.app/Contents/Info.plist'), env || process.env).catch(() => null);
+    async run({ root, facts, env, signal }) {
+      const built = await plistVersion(join(root, 'dist/release/HoldThis.app/Contents/Info.plist'), env || process.env, signal).catch(error => {
+        if (signal?.aborted) throw error;
+        return null;
+      });
       facts.set({
         key: 'version.built', role: 'built-version', value: built, state: built ? 'present' : 'missing',
         provenance: { source: 'probe', id: 'version.built' },
@@ -295,11 +304,14 @@ const probes = [
   {
     id: 'notarization.stapled',
     facts: ['notarization.stapled'],
-    async run({ root, facts }) {
+    async run({ root, facts, env, signal }) {
       const app = join(root, 'dist/release/HoldThis.app');
       const info = await stat(app).catch(() => null);
       const stapled = info?.isDirectory()
-        ? await exec('xcrun', ['stapler', 'validate', app], { timeout: 15000 }).then(() => true, () => false)
+        ? await exec('xcrun', ['stapler', 'validate', app], { timeout: 15000, env, signal }).then(() => true, error => {
+          if (signal?.aborted) throw error;
+          return false;
+        })
         : false;
       facts.set({
         key: 'notarization.stapled', role: 'check', value: !!stapled, state: stapled ? 'present' : 'missing',
@@ -335,7 +347,7 @@ const release = {
     { name: 'Patch', apply: facts => bump(facts, 2) },
     { name: 'Minor', apply: facts => bump(facts, 1) },
     { name: 'Major', apply: facts => bump(facts, 0) },
-    { name: 'Rebuild', apply: facts => ({ ...facts.get('version.source').value }) },
+    { name: 'Rebuild', apply: facts => ({ ...sourceVersion(facts) }) },
   ],
   help: 'Increase the build to deliver an update. Rebuild keeps the current version and build.',
   submit: 'Review release →',
@@ -348,12 +360,12 @@ const release = {
     const { version: next, build: nextBuildNumber } = ctx.params;
     if (!fieldTypes.semver(next)) return 'Use major.minor.patch, for example 1.0.3.';
     if (!fieldTypes.integer(nextBuildNumber)) return 'The build must be a positive integer.';
-    const source = ctx.facts.get('version.source').value;
+    const source = sourceVersion(ctx.facts);
     if (BigInt(nextBuildNumber) < BigInt(source.build)) return `Build must be ${source.build} or greater.`;
     return '';
   },
   review(ctx, jobs) {
-    const source = ctx.facts.get('version.source').value;
+    const source = sourceVersion(ctx.facts);
     const { version: next, build: nextBuildNumber } = ctx.params;
     const signedOnly = ctx.mode.signedOnly;
     return {
@@ -371,7 +383,7 @@ const release = {
     };
   },
   resolve(ctx) {
-    const source = ctx.facts.get('version.source').value;
+    const source = sourceVersion(ctx.facts);
     const { version: next, build: nextBuildNumber } = ctx.params;
     const jobs = [];
     if (next !== source.version || nextBuildNumber !== source.build) jobs.push(materialize(version, ctx));
@@ -427,7 +439,7 @@ const publish = {
     return '';
   },
   confirmStart(ctx) {
-    const source = ctx.facts.get('version.source').value;
+    const source = ctx.facts.get('version.source')?.value;
     const built = ctx.facts.get('version.built').value;
     return {
       title: 'Validate release for publishing',

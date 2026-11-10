@@ -52,10 +52,7 @@ export function probeWaves(probes) {
 }
 
 function cloneFact(fact) {
-  const copy = { ...fact };
-  if (fact.value && typeof fact.value === 'object') copy.value = Array.isArray(fact.value) ? [...fact.value] : { ...fact.value };
-  if (fact.provenance && typeof fact.provenance === 'object') copy.provenance = { ...fact.provenance };
-  return copy;
+  return structuredClone(fact);
 }
 
 function cloneFactStore(facts) {
@@ -94,6 +91,7 @@ async function runProbe(probe, live, ctx) {
     if (ctx.demo) {
       if (typeof probe.demo === 'function') await probe.demo(probeCtx);
     } else if (typeof probe.run === 'function') await probe.run(probeCtx);
+    if (ctx.signal?.aborted) return { aborted: true, id: probe.id };
     return { ok: true, id: probe.id, keys: keysToMerge(probe, scratch, ctx.demo), scratch: scratch.facts };
   } catch (error) {
     if (isAbort(error, ctx.signal)) return { aborted: true, id: probe.id };

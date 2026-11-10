@@ -7,6 +7,7 @@ export async function runCockpit({ createApp, render, snapshot = false }) {
   function restore() {
     if (closed) return;
     closed = true;
+    app?.refreshAbort?.abort();
     clearInterval(interval);
     if (!snapshot) {
       process.stdin.setRawMode(false);
