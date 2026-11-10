@@ -41,6 +41,7 @@ Release editing, command search, review, help, artifact inspection, and cancella
 
 - `bin/cli.js`: CLI flags, profile loading, and wiring into the cockpit runtime.
 - `src/workflow/load.js`: loads `releasethis.config.js` from the working directory. This package still opens the HoldThis profile when that file is absent.
+- `examples/library`: a second workflow. It tests, packs, checksums, and publishes, and it has no HoldThis steps.
 - `src/workflow/refresh.js`: runs profile probes off the key path, isolates a failed probe, and streams checksum verification.
 - `src/tui/runtime.js`: terminal lifecycle, raw keyboard input, resize handling, and differential drawing.
 - `src/tui/terminal.js` / `src/tui/format.js` / `src/tui/logs.js` / `src/tui/runner.js`: paint, formatting, log viewport, and process supervision.

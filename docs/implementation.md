@@ -18,7 +18,7 @@ Section order below is a design boundary, not the build order. The build order i
 | [HoldThis profile](#6-holdthis-profile) | `docs/impl/holdthis-profile.md` | 3 | Done |
 | [Profiles](#7-profiles) | [docs/impl/profiles.md](impl/profiles.md) | 4 | Done |
 | [Workspace refresh](#8-workspace-refresh) | [docs/impl/workspace-refresh.md](impl/workspace-refresh.md) | 5 | Done |
-| [Host genericity](#9-host-genericity) | `docs/impl/host-genericity.md` | 6–7 | Not started |
+| [Host genericity](#9-host-genericity) | [docs/impl/host-genericity.md](impl/host-genericity.md) | 6–7 | Phase 6 done |
 
 Phases match the roadmap in the architecture document. A phase is done only when every section that lists it meets that phase's exit.
 
@@ -243,9 +243,9 @@ Refreshing the workspace observes facts through probes without freezing the cock
 
 ## 9. Host genericity
 
-**Technical document:** `docs/impl/host-genericity.md`
+**Technical document:** [docs/impl/host-genericity.md](impl/host-genericity.md)
 
-Proof that the host is a product other repos can depend on, followed by moving HoldThis out.
+Proof that the host is a product other repos can depend on, followed by moving HoldThis out. Phase 6 has landed. The fixture is [`examples/library`](../examples/library/releasethis.config.js). Phase 7 has not.
 
 **Outcome.** A non-HoldThis workflow runs with no renderer change and no branch on profile id. After extraction, this package is the host, and HoldThis ships only its profile.
 

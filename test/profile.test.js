@@ -1,9 +1,11 @@
 import { test, expect, describe, beforeEach, afterEach } from 'bun:test';
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { chmod, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { App } from '../src/release/app.js';
+import { holdthis } from '../src/profiles/holdthis.js';
 import { render } from '../src/release/view.js';
 import { requirement, resolvePlan } from '../src/workflow/model.js';
 import { loadProfile, profileForDirectory } from '../src/workflow/load.js';
@@ -552,5 +554,140 @@ describe('missing and invalid profiles', () => {
     if (code !== 0) throw new Error(stderr || stdout);
     expect(stdout).toContain('Apple Silicon');
     expect(stdout).toContain('Build app');
+  });
+});
+
+const libraryExample = join(packageRoot, 'examples/library');
+const publishBlocked = 'Pack the archive and verify its checksum first.';
+
+async function copyLibrary() {
+  await cp(join(libraryExample, 'releasethis.config.js'), join(temp, 'releasethis.config.js'));
+  return loadProfile(temp);
+}
+
+async function libraryApp({ demo }) {
+  const loaded = await copyLibrary();
+  expect(loaded.ok).toBe(true);
+  const a = new App({ root: temp, demo, profile: loaded.profile });
+  a.runner.demoPace = 0;
+  await a.refresh();
+  return a;
+}
+
+async function writeLibraryArchive() {
+  const body = Buffer.from('library archive\n');
+  await mkdir(join(temp, 'out'), { recursive: true });
+  await writeFile(join(temp, 'out/library.tgz'), body);
+  const digest = createHash('sha256').update(body).digest('hex');
+  await writeFile(join(temp, 'out/library.tgz.sha256'), `${digest}  library.tgz\n`);
+}
+
+describe('library workflow', () => {
+  test('loads with its own tasks and no mode chip', async () => {
+    const loaded = await loadProfile(libraryExample);
+    expect(loaded.ok).toBe(true);
+    expect(loaded.profile.id).toBe('library');
+    expect(loaded.profile.mode).toBeUndefined();
+    expect(Object.keys(loaded.profile.tasks).filter(id => holdthis.tasks[id])).toEqual([]);
+    expect(loaded.profile.plans.release.steps.map(step => step.taskId)).toEqual(['test', 'pack', 'checksum']);
+    expect(loaded.profile.plans.publish.kind).toBe('gated');
+    const a = await libraryApp({ demo: true });
+    const frame = screen(a);
+    expect(frame).toContain('Library');
+    expect(frame).toContain('Test');
+    expect(frame).toContain('Pack');
+    expect(frame).not.toContain('Apple Silicon');
+    expect(frame).not.toContain('Build app');
+    expect(frame).not.toContain('Notarize app');
+    expect(frame).not.toContain('signed only');
+  });
+
+  test('a demo release stays separate from publish', async () => {
+    const a = await libraryApp({ demo: true });
+    expect(a.profile.plans.publish.blocked(a.context())).toBe(publishBlocked);
+    a.key('p', key('p'));
+    expect(a.notice).toBe(publishBlocked);
+    expect(a.modal).toBeNull();
+    a.openRun(a.profile.plans.release);
+    await accept(a);
+    expect(a.runner.result).toBe('done');
+    expect(a.runner.jobs.map(job => job.id)).toEqual(['test', 'pack', 'checksum']);
+    const scripted = a.runner.logs.map(line => line.text);
+    expect(scripted).toContain('tests passed');
+    expect(scripted).toContain('archive packed');
+    expect(scripted).toContain('checksum written');
+    expect(scripted).not.toContain('package uploaded');
+    expect(a.facts.get('artifact.tested')).toMatchObject({ state: 'present', provenance: { source: 'task', id: 'test' } });
+    expect(a.facts.get('artifact.archive').state).toBe('present');
+    expect(a.facts.get('artifact.archive.sha256').state).toBe('present');
+    expect(a.profile.plans.publish.blocked(a.context())).toBe('');
+    expect(await Bun.file(join(temp, 'invocations.txt')).exists()).toBe(false);
+    a.openGated(a.profile.plans.publish);
+    expect(a.modal.title).toBe('Validate package');
+    await accept(a);
+    expect(a.runner.result).toBe('paused');
+    expect(a.runner.logs.map(line => line.text)).toContain('validation passed');
+    expect(a.runner.logs.map(line => line.text)).not.toContain('package uploaded');
+    a.openGated(a.profile.plans.publish);
+    expect(a.modal.title).toBe('Upload package');
+    expect(a.modal.danger).toBe(true);
+    await accept(a);
+    expect(a.runner.result).toBe('done');
+    expect(a.runner.jobs.map(job => job.id)).toEqual(['validate', 'upload']);
+    expect(a.runner.logs.map(line => line.text)).toContain('package uploaded');
+    expect(await Bun.file(join(temp, 'invocations.txt')).exists()).toBe(false);
+  });
+
+  test('packaging does not upload, and a real checksum opens publish', async () => {
+    await writeScript('release.sh');
+    const a = await libraryApp({ demo: false });
+    expect(a.profile.plans.publish.blocked(a.context())).toBe(publishBlocked);
+    a.openRun(a.profile.plans.release);
+    await accept(a);
+    expect(a.runner.result).toBe('done');
+    expect(await readFile(join(temp, 'invocations.txt'), 'utf8')).toBe('test\npack\nchecksum\n');
+    expect(a.profile.plans.publish.blocked(a.context())).toBe(publishBlocked);
+    a.key('p', key('p'));
+    expect(a.modal).toBeNull();
+    await writeLibraryArchive();
+    await a.refresh();
+    expect(a.facts.get('artifact.archive').state).toBe('present');
+    expect(a.facts.get('artifact.archive.sha256')).toMatchObject({ state: 'verified', kind: 'checksum' });
+    expect(a.profile.plans.publish.blocked(a.context())).toBe('');
+    a.openGated(a.profile.plans.publish);
+    await accept(a);
+    expect(a.runner.result).toBe('paused');
+    expect(await readFile(join(temp, 'invocations.txt'), 'utf8')).toBe('test\npack\nchecksum\nvalidate\n');
+    a.openGated(a.profile.plans.publish);
+    expect(a.modal.danger).toBe(true);
+    await accept(a);
+    expect(a.runner.result).toBe('done');
+    expect(await readFile(join(temp, 'invocations.txt'), 'utf8')).toBe('test\npack\nchecksum\nvalidate\nupload\n');
+  });
+
+  test('a snapshot of the example directory shows the library header', async () => {
+    const proc = Bun.spawn(['bun', join(packageRoot, 'bin/cli.js'), '--demo', '--snapshot'], {
+      cwd: libraryExample,
+      stdout: 'pipe',
+      stderr: 'pipe',
+      env: { ...process.env, NO_COLOR: '1' },
+    });
+    const [stdout, stderr, code] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    if (code !== 0) throw new Error(stderr || stdout);
+    expect(stdout).toContain('Library');
+    expect(stdout).toContain('Test');
+    expect(stdout).toContain('Pack');
+    expect(stdout).not.toContain('Apple Silicon');
+    expect(stdout).not.toContain('Build app');
+    expect(stdout).not.toContain('Notarize app');
+  });
+
+  test('the cockpit and runner do not branch on a profile', async () => {
+    const sources = await Promise.all(['src/release/view.js', 'src/release/app.js', 'src/tui/runner.js'].map(path => readFile(join(packageRoot, path), 'utf8')));
+    expect(sources.join('\n')).not.toMatch(/profile\.id|holdthis|HoldThis|notarize|Apple/);
   });
 });
