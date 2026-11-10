@@ -146,12 +146,19 @@ export function fileProbe(desc, createFact) {
 
 // Boolean match. A missing archive, a bad sidecar, or a mismatched digest is false.
 // Abort rejects; other IO failures do not.
+function checksumRecord(text) {
+  const line = String(text).trim().split(/\r?\n/, 1)[0] ?? '';
+  const match = /^([a-fA-F\d]{64})\s+(.*)$/.exec(line);
+  if (!match?.[2]) return null;
+  return { digest: match[1], name: match[2] };
+}
+
 export async function verifyChecksum(archive, checksum, { status, signal, highWaterMark } = {}) {
   let stream;
   const onAbort = () => stream?.destroy(abortError());
   try {
-    const [expected, recorded] = (await readFile(checksum, 'utf8')).trim().split(/\s+/);
-    if (!/^[a-f\d]{64}$/i.test(expected) || recorded !== basename(archive)) return false;
+    const recorded = checksumRecord(await readFile(checksum, 'utf8'));
+    if (!recorded || recorded.name !== basename(archive)) return false;
     const info = await stat(archive);
     const hash = createHash('sha256');
     let read = 0;
@@ -172,7 +179,7 @@ export async function verifyChecksum(archive, checksum, { status, signal, highWa
       });
     }
     if (signal?.aborted) throw abortError();
-    return hash.digest('hex') === expected.toLowerCase();
+    return hash.digest('hex') === recorded.digest.toLowerCase();
   } catch (error) {
     if (isAbort(error, signal)) throw error?.name === 'AbortError' ? error : abortError();
     return false;
