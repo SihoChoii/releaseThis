@@ -957,6 +957,76 @@ describe('parameter schema form', () => {
     a.key('4', {});
     expect(a.modal.params.serial).toBe('94');
   });
+
+  test('a long form follows the focused field at 58 × 20 and after resize', () => {
+    const fields = Array.from({ length: 12 }, (_, index) => ({ name: `v${index}`, type: 'integer', label: `Field${index}` }));
+    const values = Object.fromEntries(fields.map(field => [field.name, '1']));
+    const a = formApp(fields, [{ name: 'Default', opening: true, apply: () => ({ ...values }) }]);
+    a.newRelease();
+    const frame = (columns, rows) => render(a, columns, rows, { color: false }).join('\n');
+    expect(frame(58, 20)).toContain('Field0');
+    expect(frame(58, 20)).not.toContain('Field11');
+    expect(a.modal.field).toBe(0);
+    expect(a.modal.scroll).toBe(0);
+
+    for (let index = 0; index < 11; index++) a.key('', key('tab'));
+    expect(a.modal.field).toBe(11);
+    let small = frame(58, 20);
+    expect(small).toContain('Field11');
+    expect(small).toContain(a.profile.plans.release.submit);
+    expect(small).not.toContain('↑ ↓ scroll');
+    expect(a.modal.scroll).toBeGreaterThan(0);
+
+    const wide = frame(110, 34);
+    expect(wide).toContain('Field0');
+    expect(wide).toContain('Field11');
+    expect(a.modal.scroll).toBe(0);
+    small = frame(58, 20);
+    expect(small).toContain('Field11');
+    expect(a.modal.scroll).toBeGreaterThan(0);
+
+    for (let index = 0; index < 11; index++) a.key('', { name: 'tab', shift: true });
+    expect(a.modal.field).toBe(0);
+    expect(frame(58, 20)).toContain('Field0');
+
+    for (let index = 0; index < 11; index++) a.key('', key('down'));
+    expect(a.modal.field).toBe(11);
+    expect(frame(58, 20)).toContain('Field11');
+    for (let index = 0; index < 11; index++) a.key('', key('up'));
+    expect(a.modal.field).toBe(0);
+    expect(frame(58, 20)).toContain('Field0');
+
+    for (let index = 0; index < 12; index++) a.key('', key('tab'));
+    expect(a.modal.field).toBe(12);
+    a.profile.plans.release.validate = () => 'Build is not ready for release';
+    a.key('', key('return'));
+    small = frame(58, 20);
+    expect(a.modal.type).toBe('release');
+    expect(a.modal.error).toBe('Build is not ready for release');
+    expect(small).toContain('Build is not ready for release');
+    expect(small).toContain(a.profile.plans.release.submit);
+  });
+
+  test('reverse navigation brings a scrolled field back into view', () => {
+    const fields = Array.from({ length: 16 }, (_, index) => ({ name: `v${index}`, type: 'integer', label: `Field${index}` }));
+    const values = Object.fromEntries(fields.map(field => [field.name, '1']));
+    const a = formApp(fields, [{ name: 'Default', opening: true, apply: () => ({ ...values }) }]);
+    a.newRelease();
+    const frame = () => render(a, 58, 20, { color: false }).join('\n');
+    expect(frame()).toContain('Field0');
+    expect(frame()).not.toContain('Field15');
+    for (let index = 0; index < 15; index++) a.key('', key('down'));
+    expect(a.modal.field).toBe(15);
+    let shown = frame();
+    expect(shown).toContain('Field15');
+    expect(shown).not.toContain('Field0');
+    for (let index = 0; index < 15; index++) a.key('', key('up'));
+    expect(a.modal.field).toBe(0);
+    shown = frame();
+    expect(shown).toContain('Field0');
+    expect(shown).not.toContain('Field15');
+    expect(shown).toContain(a.profile.plans.release.submit);
+  });
 });
 
 describe('demo produced artifact facts', () => {
