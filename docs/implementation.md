@@ -16,7 +16,7 @@ Section order below is a design boundary, not the build order. The build order i
 | [Cockpit](#4-cockpit) | `docs/impl/cockpit.md` | 3 | Done |
 | [Plan execution](#5-plan-execution) | `docs/impl/plan-execution.md` | 3 | Done |
 | [HoldThis profile](#6-holdthis-profile) | `docs/impl/holdthis-profile.md` | 3 | Done |
-| [Profiles](#7-profiles) | `docs/impl/profiles.md` | 4 | Not started |
+| [Profiles](#7-profiles) | [docs/impl/profiles.md](impl/profiles.md) | 4 | Done |
 | [Workspace refresh](#8-workspace-refresh) | `docs/impl/workspace-refresh.md` | 5 | Not started |
 | [Host genericity](#9-host-genericity) | `docs/impl/host-genericity.md` | 6–7 | Not started |
 
@@ -193,7 +193,7 @@ The current product, expressed as the first profile. This is the acceptance test
 
 ## 7. Profiles
 
-**Technical document:** `docs/impl/profiles.md`
+**Technical document:** [docs/impl/profiles.md](impl/profiles.md)
 
 A repo adapts the cockpit by shipping a profile. The declarative file is the common path. Code registration is the escape hatch.
 
@@ -215,7 +215,7 @@ The checksum probe's streaming and failure isolation belong to workspace refresh
 
 **Done when.** A fixture repo with three declarative steps runs under demo and against a temporary script. A second fixture registers a code probe the declarative helpers cannot express, loads from the working directory, and runs. The HoldThis demo still passes. A repo with no profile does not show the HoldThis pipeline.
 
-**Open questions.** Architecture questions 1 (filename and whether a non-JS form exists), 6 (declarative progress patterns), 10 (demo lines in a declarative task), and 11 (one profile per repo versus a named profile flag).
+**Open questions.** Architecture question 6 (declarative progress patterns). Command tasks report only through `::status`.
 
 ## 8. Workspace refresh
 

@@ -115,11 +115,16 @@ describe('keyboard and review flows', () => {
     const a = app(); a.key('/', {}); a.key('artifacts', {}); a.key('', key('return'));
     expect(a.tab).toBe(1); expect(a.modal).toBeNull();
   });
-  test('publish validation precedes a separate upload review', () => {
+  test('publish validation precedes a separate upload review', async () => {
     const a = app(); a.publish();
     expect(a.modal.title).toContain('Validate');
     expect(a.modal.lines.join(' ')).toContain('--dry-run');
-    a.modal = null; a.preflightReady = true; a.publish();
+    a.runner.demoPace = 0;
+    await a.modal.callback();
+    expect(a.runner.result).toBe('paused');
+    expect(a.modal).toBeNull();
+    expect(a.preflightReady).toBe(true);
+    a.publish();
     expect(a.modal.title).toBe('Publish to GitHub');
     expect(a.modal.lines.join(' ')).toContain('v1.0.2+3');
     expect(a.modal.lines.join(' ')).toContain('repo unknown');

@@ -57,20 +57,24 @@ describe('detectGithubRepo', () => {
 });
 
 describe('repo in UI', () => {
-  test('publish confirm and header include the detected repo', () => {
+  test('publish confirm and header include the detected repo', async () => {
     const a = new App({ root: '/tmp', demo: true, repo: 'SihoChoii/releaseThis', profile: holdthis });
     a.workspace = holdthis.demoWorkspace();
-    a.preflightReady = true;
+    a.runner.demoPace = 0;
+    a.publish();
+    await a.modal.callback();
     a.publish();
     expect(a.modal.lines.join(' ')).toContain('SihoChoii/releaseThis');
     const frame = render(a, 96, 24, { color: false }).join('\n');
     expect(frame).toContain('SihoChoii/releaseThis');
   });
 
-  test('unknown repo shows a fallback label', () => {
+  test('unknown repo shows a fallback label', async () => {
     const a = new App({ root: '/tmp', demo: true, repo: null, profile: holdthis });
     a.workspace = holdthis.demoWorkspace();
-    a.preflightReady = true;
+    a.runner.demoPace = 0;
+    a.publish();
+    await a.modal.callback();
     a.publish();
     expect(a.modal.lines.join(' ')).toContain('repo unknown');
     expect(render(a, 96, 24, { color: false }).join('\n')).toContain('repo unknown');

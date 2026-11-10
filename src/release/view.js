@@ -50,7 +50,7 @@ function pipeline(app, width, height, c, frame, now) {
     if (height >= 17) lines.push(state.meter == null ? '    ' + c(state.label, 'muted') : '    ' + bar(state.meter, 1, 8, c) + (state.label ? c(' ' + state.label, 'muted') : ''));
     if (spacious && index !== catalog.length - 1) lines.push('    ' + c('│', 'line'));
   });
-  if (height >= 25) lines.push('', ' ' + c('Release mode', 'muted'), ' ' + c(app.signedOnly ? mode.sidebar.on : mode.sidebar.off, app.signedOnly ? 'amber' : 'mint'), ' ' + c(mode.sidebar.hint, 'muted'));
+  if (height >= 25 && mode?.sidebar) lines.push('', ' ' + c('Release mode', 'muted'), ' ' + c(app.signedOnly ? mode.sidebar.on : mode.sidebar.off, app.signedOnly ? 'amber' : 'mint'), ' ' + c(mode.sidebar.hint, 'muted'));
   return box('Pipeline', lines, width, c, height);
 }
 
@@ -79,8 +79,11 @@ function overview(app, width, height, c) {
     lines.push(' ' + c(`${present}/${ws.artifacts.length} files present`, present === ws.artifacts.length ? 'mint' : 'amber') + c('   │   ', 'line') + c(`${verified}/${checksums.length} checksums verified`, verified === checksums.length ? 'mint' : 'amber'));
     for (const check of ws.checks) lines.push(' ' + c(check.value ? check.whenTrue : check.whenFalse, check.value ? 'mint' : 'muted'));
     if (height >= 25) {
-      const blocked = app.gatedPlan().blocked(app.context());
-      lines.push(' ' + c(blocked || copy.publishReady, blocked ? 'amber' : 'ice'));
+      const gated = app.gatedPlan();
+      if (gated) {
+        const blocked = gated.blocked(app.context());
+        lines.push(' ' + c(blocked || copy.publishReady, blocked ? 'amber' : 'ice'));
+      }
       if (app.runner.result) lines.push('', ' ' + c(`Last task: ${app.runTitle || 'Release'} · ${app.runner.result}`, app.runner.result === 'done' ? 'mint' : 'amber'));
       else lines.push('', ' ' + c(copy.tip, 'muted'));
     }
@@ -100,7 +103,7 @@ function steps(app, width, height, c, frame, now) {
     lines.push(selected ? c.selected(label, width - 2) : c(label, state.tone));
     if (height >= 24) lines.push('      ' + c(task.detail, 'muted'));
   });
-  if (height >= 14) {
+  if (height >= 14 && catalog[app.selection]) {
     const task = catalog[app.selection];
     const skipped = task.skip?.(app.mode()) || '';
     const blocked = skipped || (app.facts ? task.requires?.(app.context()) || '' : 'Reading workspace…');
@@ -123,7 +126,7 @@ function artifacts(app, width, height, c) {
     lines.push(selected ? c.selected(row, width - 2) : splitLine(c(label), c(`${tail}  ${artifact.size || '—'} `, tone), width - 2));
     if (height >= 23) lines.push('     ' + c(artifact.short || artifact.path, 'muted'));
   }
-  if (height >= 16 && app.workspace) lines.push('', ' ' + c(copy.signed(version(app.workspace.built), stamp(app.refreshedAt)), 'muted'));
+  if (height >= 16 && app.workspace && typeof copy.signed === 'function') lines.push('', ' ' + c(copy.signed(version(app.workspace.built), stamp(app.refreshedAt)), 'muted'));
   if (height >= 23) lines.push(' ' + c(copy.artifactHint, 'muted'));
   return box('Artifacts', lines, width, c, height);
 }
@@ -132,9 +135,9 @@ function output(app, width, height, c) {
   let top = [];
   if (app.runner.jobs.length && height >= 16) {
     const runner = app.runner;
-    const title = runner.running ? runner.cancelled ? 'Stopping task…' : app.runTitle || 'Task running' : runner.result === 'done' ? 'Task completed' : runner.result === 'failed' ? 'Task failed' : 'Task cancelled';
+    const title = runner.running ? runner.cancelled ? 'Stopping task…' : app.runTitle || 'Task running' : runner.result === 'done' ? 'Task completed' : runner.result === 'paused' ? 'Task paused' : runner.result === 'failed' ? 'Task failed' : 'Task cancelled';
     top = [' ' + c(title, runner.result === 'failed' ? 'red' : runner.result === 'done' ? 'mint' : 'ice', true)];
-    if (!runner.running) top.push(' ' + c(app.preflightReady ? 'P review upload   E save log' : ['failed', 'cancelled'].includes(runner.result) ? 'T resume remaining stages   E save log' : 'A inspect artifacts   P publish   E save log', 'muted'));
+    if (!runner.running) top.push(' ' + c(runner.result === 'paused' ? 'T continue plan   E save log' : ['failed', 'cancelled'].includes(runner.result) ? 'T resume remaining stages   E save log' : 'A inspect artifacts   P publish   E save log', 'muted'));
     top.push(' ' + c('─'.repeat(width - 4), 'line'));
   }
   const logs = logLines(app, width - 2, height - 2 - top.length, c);
@@ -152,10 +155,10 @@ export function render(app, columns, rows, { color = true, now = Date.now() } = 
   const repoLabel = app.repo || 'repo unknown';
   const modeLabel = app.demo ? 'DEMO · simulated' : 'local release';
   const topRight = c(` ${repoLabel} · ${modeLabel} `, app.demo ? 'amber' : 'muted');
-  const chip = app.signedOnly ? app.profile.mode.chip.on : app.profile.mode.chip.off;
+  const chip = app.profile.mode?.chip ? (app.signedOnly ? app.profile.mode.chip.on : app.profile.mode.chip.off) : '';
   let lines = [
     splitLine(' ' + c('▗▖ ▗▖', 'amber') + '  ' + c('releaseThis', 'ink', true) + c(' / release cockpit', 'muted'), topRight, width),
-    ' ' + c('▐▙▄▟▌', 'amber') + '  ' + c(app.profile.header.subtitle, 'muted') + c('  /  ', 'line') + c(chip, app.signedOnly ? 'amber' : 'mint'), '',
+    ' ' + c('▐▙▄▟▌', 'amber') + '  ' + c(app.profile.header.subtitle, 'muted') + (chip ? c('  /  ', 'line') + c(chip, app.signedOnly ? 'amber' : 'mint') : ''), '',
     splitLine(' ' + ['Workspace', 'Artifacts', 'Logs'].map((label, i) => c(`${i === app.tab ? '●' : '·'} ${label}  `, i === app.tab ? 'amber' : 'muted', i === app.tab)).join(''), c('/ commands  ? help ', 'muted'), width),
   ];
   const main = app.tab === 2 ? output(app, mainWidth, height, c) : app.tab === 1 ? artifacts(app, mainWidth, height, c) : app.screen === 'steps' ? steps(app, mainWidth, height, c, frame, now) : overview(app, mainWidth, height, c);

@@ -65,18 +65,22 @@ export function factsFromWorkspace(profile, workspace) {
 }
 
 export function materialize(task, ctx) {
-  const args = task.args(ctx);
-  return {
+  const listed = task.command?.(ctx);
+  const command = Array.isArray(listed) ? listed : null;
+  const args = task.args ? task.args(ctx) : (command ? command.slice(1) : []);
+  const job = {
     id: task.id,
     label: task.label,
     detail: task.detail,
     args,
-    display: ctx.commandLine ? ctx.commandLine(args) : args.join(' '),
+    display: command?.length ? command.join(' ') : (ctx.commandLine ? ctx.commandLine(args) : args.join(' ')),
     demo: task.demo,
     applyDemo: task.applyDemo,
     onDone: task.onDone,
     resume: task.resume || null,
   };
+  if (command?.length) job.command = command;
+  return job;
 }
 
 export function resolvePlan(plan, ctx) {

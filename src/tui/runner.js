@@ -114,6 +114,7 @@ export class Runner {
     this.logRevision = 0;
     this.statusSlot = null;
     this.session = null;
+    this.pause = null;
     this.demoPace = 600;
   }
 
@@ -160,14 +161,21 @@ export class Runner {
     this.running = true;
     this.cancelled = false;
     this.result = null;
-    this.startedAt = Date.now();
+    this.pause = null;
+    this.startedAt = this.session?.startedAt || Date.now();
+    if (this.session) this.session.startedAt = this.startedAt;
     this.endedAt = null;
     this.log(this.demo ? 'Demo session · release actions are simulated.' : 'Starting release task.', 'notice');
     this.onChange('chrome');
     try {
-      for (const job of this.jobs) {
+      for (const [index, job] of this.jobs.entries()) {
         if (job.status === 'done') continue;
         if (this.cancelled) break;
+        if (job.confirm && !job.confirmed) {
+          this.result = 'paused';
+          this.pause = { reason: 'confirm', index };
+          break;
+        }
         job.status = 'running';
         job.startedAt = Date.now();
         this.statusSlot = null;
@@ -183,6 +191,11 @@ export class Runner {
           break;
         }
         this.log(`${job.label} completed.`, 'success');
+        if (job.after === 'pause' && index < this.jobs.length - 1) {
+          this.result = 'paused';
+          this.pause = { reason: 'after', index: index + 1, notice: job.pauseNotice };
+          break;
+        }
       }
       this.result ||= this.cancelled ? 'cancelled' : 'done';
       return this.result;
@@ -202,7 +215,13 @@ export class Runner {
 
   execute(job) {
     return new Promise(resolve => {
-      const child = spawn(this.script, job.args, { cwd: this.root, env: { ...this.env, NO_COLOR: '1', TERM: 'dumb' },
+      const argv = job.command?.length ? job.command : [this.script, ...(job.args || [])];
+      if (!argv[0]) {
+        this.log('Task has no command.', 'error');
+        resolve(1);
+        return;
+      }
+      const child = spawn(argv[0], argv.slice(1), { cwd: this.root, env: { ...this.env, NO_COLOR: '1', TERM: 'dumb' },
         detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
       this.child = child;
       for (const stream of [child.stdout, child.stderr]) {

@@ -1,9 +1,12 @@
 #!/usr/bin/env bun
+import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { App } from '../src/release/app.js';
 import { detectGithubRepo } from '../src/release/repo.js';
 import { render } from '../src/release/view.js';
 import { runCockpit } from '../src/tui/runtime.js';
 import { holdthis } from '../src/profiles/holdthis.js';
+import { PROFILE_FILE, profileForDirectory } from '../src/workflow/load.js';
 
 const args = process.argv.slice(2);
 const allowed = new Set(['--demo', '--snapshot', '--no-motion', '--help', '-h']);
@@ -20,8 +23,11 @@ Usage: releasethis [--demo] [--no-motion] [--snapshot]
   --no-motion  Disable animated indicators
   --snapshot   Print one plain-text frame and exit
 
-Uses the current working directory as the host project and reads
-git remote origin (or RELEASETHIS_REPO) for the GitHub owner/repo.
+Uses the current working directory as the project to release.
+The workflow comes from ${PROFILE_FILE} in that directory.
+Running this package with no config file opens the built-in HoldThis profile.
+
+Reads git remote origin (or RELEASETHIS_REPO) for the GitHub owner/repo.
 
 Keys: ↑/↓ navigate, Enter select, Tab views, / commands, ? help, Q quit`);
   process.exit(0);
@@ -33,7 +39,9 @@ if (!snapshot && (!process.stdin.isTTY || !process.stdout.isTTY || process.env.T
 }
 
 const root = process.cwd();
+const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const { repo } = detectGithubRepo(root);
+const profile = await profileForDirectory(root, { packageRoot, fallback: holdthis });
 
 await runCockpit({
   snapshot,
@@ -45,6 +53,6 @@ await runCockpit({
     motion: !args.includes('--no-motion') && process.env.RELEASETHIS_REDUCED_MOTION !== '1',
     onChange,
     onQuit,
-    profile: holdthis,
+    profile,
   }),
 });

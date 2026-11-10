@@ -370,6 +370,12 @@ const publish = {
   id: 'publish',
   kind: 'gated',
   resume: 'revalidate',
+  resolve(ctx) {
+    return this.steps.map(step => ({ ...materialize(tasks[step.taskId], ctx),
+      ...(step.confirm ? { confirm: step.confirm } : {}),
+      ...(step.after ? { after: step.after, pauseNotice: step.pauseNotice } : {}),
+    }));
+  },
   steps: [
     {
       taskId: 'preflight',
