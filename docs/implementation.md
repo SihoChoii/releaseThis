@@ -17,7 +17,7 @@ Section order below is a design boundary, not the build order. The build order i
 | [Plan execution](#5-plan-execution) | `docs/impl/plan-execution.md` | 3 | Done |
 | [HoldThis profile](#6-holdthis-profile) | `docs/impl/holdthis-profile.md` | 3 | Done |
 | [Profiles](#7-profiles) | [docs/impl/profiles.md](impl/profiles.md) | 4 | Done |
-| [Workspace refresh](#8-workspace-refresh) | `docs/impl/workspace-refresh.md` | 5 | Not started |
+| [Workspace refresh](#8-workspace-refresh) | [docs/impl/workspace-refresh.md](impl/workspace-refresh.md) | 5 | Done |
 | [Host genericity](#9-host-genericity) | `docs/impl/host-genericity.md` | 6–7 | Not started |
 
 Phases match the roadmap in the architecture document. A phase is done only when every section that lists it meets that phase's exit.
@@ -219,7 +219,7 @@ The checksum probe's streaming and failure isolation belong to workspace refresh
 
 ## 8. Workspace refresh
 
-**Technical document:** `docs/impl/workspace-refresh.md`
+**Technical document:** [docs/impl/workspace-refresh.md](impl/workspace-refresh.md)
 
 Refreshing the workspace observes facts through probes without freezing the cockpit.
 

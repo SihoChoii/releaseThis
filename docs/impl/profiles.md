@@ -8,7 +8,7 @@ A missing file opens an empty cockpit that names `releasethis.config.js`. It doe
 
 `tasks` are command tasks. `argv` is a non-empty list of strings. `{version}`, `{build}`, and any other plan parameter are replaced from the plan's params. A missing parameter stops resolution with an error naming the parameter; a single-step action cannot run a parameterized command without its values. `requires` is a list of `{ fact, message }`. `produces` names fact keys the demo run marks present. `demo` is a list of `{ text, status }` lines, the shape the runner already plays. `skip: { when: 'signed-only', message }` skips the task while that mode is on. `catalog: false` keeps a task out of the sidebar.
 
-`artifacts` are `{ key, label, path, kind }`. `kind` is `file`, `dir`, or `checksum`. Paths stay inside the repo. Inspect stats the path and sets `present` or `missing`. A checksum artifact keeps `kind: 'checksum'` and is not hashed. Streaming verification belongs to workspace refresh.
+`artifacts` are `{ key, label, path, kind }`. `kind` is `file`, `dir`, or `checksum`. Paths stay inside the repo. Refresh stats a file or directory and sets `present` or `missing`. A checksum artifact streams its archive and becomes `missing`, `verified`, or `mismatch`. See [workspace refresh](workspace-refresh.md).
 
 `plans` have `kind` of `run`, `form`, or `gated`. A `run` plan confirms, then starts its steps. A `form` plan names `semver` or `integer` fields and literal presets. Field labels must be text. The host checks field types before any custom `validate(ctx)` rule; errors stay in the editor. If every resolved task is skipped, the form says "Nothing to run" and does not offer a start confirmation.
 
@@ -22,6 +22,6 @@ Command tasks report progress only through `::status` lines. A profile cannot na
 
 ## Code registration
 
-`export default host => { ... }` receives `host.task`, `host.probe`, `host.artifact`, `host.plan`, `host.action`, and `host.mode`. A probe `run({ root, facts })` may write facts a stat cannot derive. A task may pass `command(ctx)` or `run(ctx)` returning an argv instead of a literal `argv` list. Modules are trusted local imports. There is no sandbox, hot reload, or dependency solver.
+`export default host => { ... }` receives `host.task`, `host.probe`, `host.artifact`, `host.plan`, `host.action`, and `host.mode`. A probe `run({ root, facts, status, signal, demo, env })` may write facts a stat cannot derive. Its `facts` list names the keys it owns. A task may pass `command(ctx)` or `run(ctx)` returning an argv instead of a literal `argv` list. Modules are trusted local imports. There is no sandbox, hot reload, or dependency solver.
 
 The runner spawns `command[0]` with the remaining arguments when a job has a command. Otherwise it spawns the profile script with the task's arguments, which is how HoldThis still runs.

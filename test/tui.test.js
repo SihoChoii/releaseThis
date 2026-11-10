@@ -983,6 +983,7 @@ describe('demo produced artifact facts', () => {
     await a.refresh();
     expect(a.facts.get('artifact.app.built').state).toBe('present');
     expect(a.facts.get('artifact.update.zip.sha256').state).toBe('verified');
+    expect(a.facts.get('version.built').value).toEqual({ version: '1.0.3', build: '4' });
     expect(planBlock(holdthis.plans.publish, a.context())).toBe('');
   });
 

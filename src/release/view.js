@@ -174,9 +174,18 @@ export function render(app, columns, rows, { color = true, now = Date.now() } = 
   const taskTone = runner.result === 'failed' ? 'red' : runner.result === 'done' ? 'mint' : 'ice';
   lines.push(splitLine(' ' + bar(done, runner.jobs.length, progressWidth, c) + '  ' + c(runner.jobs.length ? `${done}/${runner.jobs.length} stages` : 'Ready', 'muted'), c(columns >= 100 ? taskState + ' ' : runner.startedAt ? duration((runner.endedAt || now) - runner.startedAt) + ' ' : '', taskTone), width));
   const copy = app.profile.copy;
-  const notice = app.notice || (runner.running ? slotNotice || taskState : app.refreshing ? copy.refreshing : app.tab === 2 ? (app.logFilter ? 'Filtered output · Esc clears the filter' : 'Output is retained for this session.') : `Checked ${stamp(app.refreshedAt)} · ${app.demo ? copy.demoIdle : copy.checked}`);
-  const noticeRows = wrap(notice, width - 2);
-  lines.push(...noticeRows.slice(0, 2).map((line, i) => ' ' + c(i === 1 && noticeRows.length > 2 ? fit(line, width - 4).trimEnd() + '…' : line, app.notice ? 'amber' : 'muted')));
+  const refreshSlot = app.refreshing ? runner.statusSlot : null;
+  const refreshPlaceholder = !refreshSlot || (refreshSlot.phase === 'Refreshing' && !refreshSlot.detail && refreshSlot.progress == null);
+  const refreshStale = refreshSlot && now - refreshSlot.heartbeatAt >= STALE_AFTER_MS;
+  const refreshText = refreshPlaceholder
+    ? copy.refreshing
+    : [refreshSlot.phase, refreshStale ? `Still working · last update ${duration(now - refreshSlot.heartbeatAt)} ago` : refreshSlot.detail, typeof refreshSlot.progress === 'number' ? `${Math.round(refreshSlot.progress * 100)}%` : null, duration(now - (app.refreshStartedAt || now))].filter(Boolean).join(' · ');
+  const refreshBar = !refreshPlaceholder && typeof refreshSlot.progress === 'number' ? bar(refreshSlot.progress, 1, 12, c) + ' ' : '';
+  const notice = app.notice || (runner.running ? slotNotice || taskState : app.refreshing ? refreshText : app.tab === 2 ? (app.logFilter ? 'Filtered output · Esc clears the filter' : 'Output is retained for this session.') : `Checked ${stamp(app.refreshedAt)} · ${app.demo ? copy.demoIdle : copy.checked}`);
+  const noticePrefix = !app.notice && !runner.running && app.refreshing ? refreshBar : '';
+  const noticeWidth = Math.max(1, width - 2 - (noticePrefix ? Bun.stringWidth(plain(noticePrefix)) : 0));
+  const noticeRows = wrap(notice, noticeWidth);
+  lines.push(...noticeRows.slice(0, 2).map((line, i) => ' ' + (i === 0 ? noticePrefix : '') + c(i === 1 && noticeRows.length > 2 ? fit(line, Math.max(0, noticeWidth - 2)).trimEnd() + '…' : line, app.notice ? 'amber' : 'muted')));
   lines.push(' ' + c(app.hintLine(), 'muted'));
   while (lines.length < rows) lines.push('');
   if (app.modal) {

@@ -1,11 +1,9 @@
-import { join, basename } from 'node:path';
-import { stat, readFile } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
+import { join } from 'node:path';
+import { stat } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { prettyBytes } from '../tui/format.js';
 import { factStore, fieldTypes, materialize, project, sameVersion } from '../workflow/model.js';
+import { checksumProbe, fileProbe, refreshFacts, verifyChecksum } from '../workflow/refresh.js';
 
 const exec = promisify(execFile);
 const explain = {
@@ -265,40 +263,59 @@ async function plistVersion(path, env) {
 }
 
 export async function checksumOK(archive, checksum) {
-  try {
-    const [expected, recorded] = (await readFile(checksum, 'utf8')).trim().split(/\s+/);
-    if (!/^[a-f\d]{64}$/i.test(expected) || recorded !== basename(archive)) return false;
-    const hash = createHash('sha256');
-    for await (const chunk of createReadStream(archive)) hash.update(chunk);
-    return hash.digest('hex') === expected.toLowerCase();
-  } catch { return false; }
+  try { return await verifyChecksum(archive, checksum); }
+  catch { return false; }
 }
 
+const byArtifact = Object.fromEntries(artifacts.map(desc => [desc.key, desc]));
+
+const probes = [
+  {
+    id: 'version.source',
+    facts: ['version.source'],
+    async run({ root, facts, env }) {
+      const source = await plistVersion(env?.HOLDTHIS_INFO_PLIST || join(root, 'Resources/Info.plist'), env || process.env);
+      facts.set({
+        key: 'version.source', role: 'source-version', value: source, state: 'present',
+        provenance: { source: 'probe', id: 'version.source' },
+      });
+    },
+  },
+  {
+    id: 'version.built',
+    facts: ['version.built'],
+    async run({ root, facts, env }) {
+      const built = await plistVersion(join(root, 'dist/release/HoldThis.app/Contents/Info.plist'), env || process.env).catch(() => null);
+      facts.set({
+        key: 'version.built', role: 'built-version', value: built, state: built ? 'present' : 'missing',
+        provenance: { source: 'probe', id: 'version.built' },
+      });
+    },
+  },
+  {
+    id: 'notarization.stapled',
+    facts: ['notarization.stapled'],
+    async run({ root, facts }) {
+      const app = join(root, 'dist/release/HoldThis.app');
+      const info = await stat(app).catch(() => null);
+      const stapled = info?.isDirectory()
+        ? await exec('xcrun', ['stapler', 'validate', app], { timeout: 15000 }).then(() => true, () => false)
+        : false;
+      facts.set({
+        key: 'notarization.stapled', role: 'check', value: !!stapled, state: stapled ? 'present' : 'missing',
+        whenTrue: '✓ App notarization ticket is stapled', whenFalse: '○ App notarization ticket not verified',
+        provenance: { source: 'probe', id: 'notarization.stapled' },
+      });
+    },
+  },
+  ...artifacts.map(desc => desc.kind === 'checksum'
+    ? checksumProbe(desc, byArtifact[desc.archive], artifactFact)
+    : fileProbe(desc, artifactFact)),
+];
+
 export async function inspect(root, env = process.env) {
-  const source = await plistVersion(env.HOLDTHIS_INFO_PLIST || join(root, 'Resources/Info.plist'), env);
-  const built = await plistVersion(join(root, 'dist/release/HoldThis.app/Contents/Info.plist'), env).catch(() => null);
-  const byKey = Object.fromEntries(artifacts.map(desc => [desc.key, desc]));
-  const observed = await Promise.all(artifacts.map(async desc => {
-    const full = join(root, desc.path);
-    const info = await stat(full).catch(() => null);
-    const exists = !!info && (desc.kind === 'dir' ? info.isDirectory() : info.isFile());
-    let state = exists ? 'present' : 'missing';
-    if (desc.kind === 'checksum' && exists) {
-      const archive = byKey[desc.archive];
-      state = await checksumOK(join(root, archive.path), full) ? 'verified' : 'mismatch';
-    }
-    return artifactFact(desc, {
-      state,
-      size: exists && desc.kind !== 'dir' ? prettyBytes(info.size) : '',
-      modifiedAt: exists ? info.mtimeMs : null,
-    });
-  }));
-  let stapled = false;
-  if (built) {
-    stapled = await exec('xcrun', ['stapler', 'validate', join(root, 'dist/release/HoldThis.app')], { timeout: 15000 })
-      .then(() => true, () => false);
-  }
-  return factStore([...versionFacts(source, built, stapled), ...observed]);
+  const { facts } = await refreshFacts({ profile: { probes, demoFacts }, root, demo: false, env });
+  return facts;
 }
 
 export function commandLine(args) {
@@ -433,6 +450,7 @@ export const holdthis = {
   commandLine,
   demoFacts,
   demoWorkspace,
+  probes,
   inspect,
   demoTag(facts) {
     const built = facts?.get('version.built')?.value;

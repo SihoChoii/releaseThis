@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { Runner } from '../tui/runner.js';
 import { assertProfileBindings, factsFromWorkspace, materialize, openingParams, project, resolvePlan } from '../workflow/model.js';
+import { refreshFacts } from '../workflow/refresh.js';
 
 export class App {
   constructor({ root, repo = null, demo = false, motion = true, onChange = () => {}, onQuit = () => {}, script, profile }) {
@@ -68,16 +69,43 @@ export class App {
     if (this.refreshing || this.runner.running) return;
     if (!keepPlan) this.invalidatePlan();
     this.refreshing = true;
+    this.refreshStartedAt = Date.now();
+    this.notice = '';
+    this.refreshAbort = new AbortController();
+    const signal = this.refreshAbort.signal;
+    this.runner.status({ phase: 'Refreshing', progress: null });
     this.onChange();
     try {
-      this.facts = this.demo ? this.facts || this.profile.demoFacts() : await this.profile.inspect(this.root);
-      const problems = this.profile.problems?.filter(Boolean) || [];
-      this.notice = problems.length ? problems.join(' ') : '';
-      this.refreshedAt = Date.now();
+      const result = await refreshFacts({
+        profile: this.profile,
+        root: this.root,
+        facts: this.facts,
+        demo: this.demo,
+        status: patch => this.runner.status(patch),
+        signal,
+        env: process.env,
+      });
+      this.facts = result.facts;
+      if (!signal.aborted) {
+        const problems = this.profile.problems?.filter(Boolean) || [];
+        const failures = result.failures.map(failure => {
+          const message = failure.error?.message?.split('\n')[0] || 'failed';
+          return `Probe "${failure.id}" failed: ${message}`;
+        });
+        for (const line of failures) this.runner.log(line, 'error');
+        this.notice = problems.length ? problems.join(' ') : failures.join(' ');
+        this.refreshedAt = Date.now();
+      }
     } catch (error) {
-      this.notice = `Could not inspect workspace: ${error.message.split('\n')[0]}`;
-      this.runner.log(error.message, 'error');
-    } finally { this.refreshing = false; this.onChange(); }
+      if (!signal.aborted) {
+        this.notice = `Could not inspect workspace: ${error.message.split('\n')[0]}`;
+        this.runner.log(error.message, 'error');
+      }
+    } finally {
+      this.refreshing = false;
+      if (!this.runner.running) this.runner.statusSlot = null;
+      this.onChange();
+    }
   }
 
   notify(text) { this.notice = text; this.onChange(); }
@@ -403,6 +431,7 @@ export class App {
     this.invalidatePlan();
   }
   requestQuit() {
+    this.refreshAbort?.abort();
     if (this.runner.running) this.confirm('Cancel active task?', ['Stops the active release process and its children.', 'Completed artifacts and version edits remain on disk.'], 'Stop task', () => this.runner.cancel(), true);
     else this.onQuit();
   }
@@ -507,7 +536,7 @@ export class App {
       }
     }
     else if (key.name === 'return' && this.tab === 1) this.inspectArtifact();
-    else if (!this.runner.running) {
+    else if (!this.runner.running && !this.refreshing) {
       const stepIndex = this.screen === 'steps' && this.tab === 0 && /^[1-9]$/.test(text) ? Number(text) - 1 : -1;
       if (stepIndex >= 0 && stepIndex < this.profile.catalog.length) { this.selection = stepIndex; this.selectStep(); }
       else if (text === 'r') this.refresh();

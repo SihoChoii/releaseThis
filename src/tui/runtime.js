@@ -45,7 +45,7 @@ export async function runCockpit({ createApp, render, snapshot = false }) {
     return;
   }
 
-  clock = createFrameClock({ paint, isRunning: () => app.runner.running, motion: () => app.motion });
+  clock = createFrameClock({ paint, isRunning: () => app.runner.running || app.refreshing, motion: () => app.motion });
   process.stdout.write('\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H');
   process.stdin.setRawMode(true);
   emitKeypressEvents(process.stdin);

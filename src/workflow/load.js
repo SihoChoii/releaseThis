@@ -3,8 +3,8 @@
 import { realpath, stat } from 'node:fs/promises';
 import { isAbsolute, join, normalize, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { prettyBytes } from '../tui/format.js';
 import { assertProfileBindings, factStore, fieldTypes, materialize } from './model.js';
+import { checksumProbe, fileProbe, refreshFacts } from './refresh.js';
 
 export const PROFILE_FILE = 'releasethis.config.js';
 
@@ -87,26 +87,22 @@ function artifactFact(desc, extra = {}) {
   };
 }
 
-// Presence only. Streaming checksum verification belongs to workspace refresh.
-async function observeArtifact(root, desc) {
-  const info = await stat(join(root, desc.path)).catch(() => null);
-  const exists = !!info && (desc.kind === 'dir' ? info.isDirectory() : info.isFile());
-  return artifactFact(desc, {
-    state: exists ? 'present' : 'missing',
-    size: exists && desc.kind !== 'dir' ? prettyBytes(info.size) : '',
-    modifiedAt: exists ? info.mtimeMs : null,
-  });
+function artifactProbes(descriptions) {
+  const byKey = new Map(descriptions.map(desc => [desc.key, desc]));
+  return descriptions.map(desc => desc.kind === 'checksum'
+    ? checksumProbe(desc, byKey.get(desc.archive), artifactFact)
+    : fileProbe(desc, artifactFact));
 }
 
 export function emptyProfile(problems = [], { missing = false } = {}) {
   const lines = problems.length ? problems : [MISSING_PROFILE];
-  return {
+  const profile = {
     id: 'empty',
     problems: lines,
     header: { subtitle: missing ? 'no profile' : 'profile problem' },
     commandLine: args => (args || []).join(' '),
     demoFacts: () => factStore(),
-    inspect: async () => factStore(),
+    probes: [],
     copy: {
       ...defaultCopy,
       intro: lines.join(' '),
@@ -119,6 +115,8 @@ export function emptyProfile(problems = [], { missing = false } = {}) {
     plans: {},
     actions: [],
   };
+  profile.inspect = async root => (await refreshFacts({ profile, root, demo: false })).facts;
+  return profile;
 }
 
 function failed(problems, found = true) {
@@ -245,7 +243,7 @@ class ProfileHost {
   compile() {
     const id = this.identity();
     const artifacts = this.artifacts();
-    const probes = this.probes();
+    const codeProbes = this.probes();
     const tasks = this.tasks();
     const plans = this.plans(tasks);
     const actions = this.actions(plans);
@@ -253,7 +251,8 @@ class ProfileHost {
     if (this.problems.length) return null;
     const taskList = [...tasks.values()];
     const descriptions = [...artifacts.values()];
-    return {
+    const probes = [...artifactProbes(descriptions), ...codeProbes];
+    const profile = {
       id,
       ...(this.script ? { script: this.script } : {}),
       problems: [],
@@ -261,12 +260,9 @@ class ProfileHost {
       ...(mode ? { mode } : {}),
       commandLine: args => (args || []).join(' '),
       demoFacts: () => factStore(descriptions.map(desc => artifactFact(desc))),
+      probes,
       async inspect(root) {
-        const facts = factStore(await Promise.all(descriptions.map(desc => observeArtifact(root, desc))));
-        for (const probe of probes) {
-          try { await probe.run({ root, facts }); }
-          catch (error) { throw new Error(`Probe "${probe.id}" failed: ${error.message.split('\n')[0]}`); }
-        }
+        const { facts } = await refreshFacts({ profile, root, demo: false });
         return facts;
       },
       copy: { ...defaultCopy, ...(this.copy || {}) },
@@ -276,6 +272,7 @@ class ProfileHost {
       plans: Object.fromEntries([...plans.entries()]),
       actions,
     };
+    return profile;
   }
 
   identity() {
@@ -316,8 +313,18 @@ class ProfileHost {
       if (!isObject(spec) || !token(spec.id)) { this.problem('A probe is missing an id.'); continue; }
       if (seen.has(spec.id)) this.problem(`Probe "${spec.id}" is declared more than once.`);
       seen.add(spec.id);
-      if (typeof spec.run !== 'function') this.problem(`Probe "${spec.id}" needs a run function.`);
-      else probes.push({ id: spec.id, run: spec.run });
+      if (typeof spec.run !== 'function') { this.problem(`Probe "${spec.id}" needs a run function.`); continue; }
+      if (spec.facts != null && (!Array.isArray(spec.facts) || spec.facts.some(key => !token(key)))) {
+        this.problem(`Probe "${spec.id}" facts must be a list of fact keys.`);
+      }
+      if (spec.demo != null && typeof spec.demo !== 'function') this.problem(`Probe "${spec.id}" demo must be a function.`);
+      const owned = Array.isArray(spec.facts) && spec.facts.length && spec.facts.every(key => token(key)) ? spec.facts : null;
+      probes.push({
+        id: spec.id,
+        run: spec.run,
+        ...(owned ? { facts: owned } : {}),
+        ...(typeof spec.demo === 'function' ? { demo: spec.demo } : {}),
+      });
     }
     return probes;
   }

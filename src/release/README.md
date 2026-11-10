@@ -41,13 +41,14 @@ Release editing, command search, review, help, artifact inspection, and cancella
 
 - `bin/cli.js`: CLI flags, profile loading, and wiring into the cockpit runtime.
 - `src/workflow/load.js`: loads `releasethis.config.js` from the working directory. This package still opens the HoldThis profile when that file is absent.
+- `src/workflow/refresh.js`: runs profile probes off the key path, isolates a failed probe, and streams checksum verification.
 - `src/tui/runtime.js`: terminal lifecycle, raw keyboard input, resize handling, and differential drawing.
 - `src/tui/terminal.js` / `src/tui/format.js` / `src/tui/logs.js` / `src/tui/runner.js`: paint, formatting, log viewport, and process supervision.
 - `src/release/app.js`: navigation, forms, action review, and publish validation flow.
 - `src/release/view.js`: responsive workspace, readiness, artifacts, pipeline, and task status.
 - `src/release/dialogs.js`: scrollable overlays for palette, forms, help, and confirmations.
 - `src/workflow/model.js` and `src/profiles/holdthis.js`: facts, tasks, and plans. The HoldThis profile owns checksum validation, plist inspection, prerequisites, and release planning.
-- `test/tui.test.js` and `test/profile.test.js`: planning, keyboard, profile loading, and child-process tests.
+- `test/tui.test.js`, `test/profile.test.js`, and `test/refresh.test.js`: planning, keyboard, profile loading, workspace refresh, and child-process tests.
 
 Real actions invoke `script/release.sh` with an argument array. The shell backend still performs signing, notarization, Gatekeeper checks, release validation, and GitHub upload. Tool output is stripped of terminal control sequences. Output retains the latest 2,500 lines for the current session. Cancellation sends SIGTERM to the entire process group and escalates to SIGKILL after three seconds if needed. Completed files and version edits are retained so individual steps can be rerun.
 

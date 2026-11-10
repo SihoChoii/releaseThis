@@ -351,7 +351,7 @@ describe('declarative profile', () => {
     const loaded = await writeProfile(stepsProfile);
     const a = new App({ root: temp, demo: false, profile: loaded.profile });
     await a.refresh();
-    expect(a.facts.get('artifact.archive.sha256')).toMatchObject({ state: 'present', kind: 'checksum' });
+    expect(a.facts.get('artifact.archive.sha256')).toMatchObject({ state: 'mismatch', kind: 'checksum' });
     expect(a.facts.get('artifact.archive').state).toBe('missing');
     const jobs = resolvePlan(a.profile.plans.release, a.context());
     expect(jobs.map(job => job.command)).toEqual([
@@ -362,7 +362,7 @@ describe('declarative profile', () => {
     await a.start(jobs);
     expect(a.runner.result).toBe('done');
     expect(await readFile(join(temp, 'invocations.txt'), 'utf8')).toBe('test\npack\nchecksum\n');
-    expect(a.facts.get('artifact.archive.sha256').state).toBe('present');
+    expect(a.facts.get('artifact.archive.sha256').state).toBe('mismatch');
   });
 
   test('a form plan checks field types and fills argv from parameters', async () => {
