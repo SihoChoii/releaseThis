@@ -561,7 +561,7 @@ const libraryExample = join(packageRoot, 'examples/library');
 const publishBlocked = 'Pack the archive and verify its checksum first.';
 
 async function copyLibrary() {
-  await cp(join(libraryExample, 'releasethis.config.js'), join(temp, 'releasethis.config.js'));
+  await cp(libraryExample, temp, { recursive: true, filter: source => source !== join(libraryExample, 'out') });
   return loadProfile(temp);
 }
 
@@ -572,14 +572,6 @@ async function libraryApp({ demo }) {
   a.runner.demoPace = 0;
   await a.refresh();
   return a;
-}
-
-async function writeLibraryArchive() {
-  const body = Buffer.from('library archive\n');
-  await mkdir(join(temp, 'out'), { recursive: true });
-  await writeFile(join(temp, 'out/library.tgz'), body);
-  const digest = createHash('sha256').update(body).digest('hex');
-  await writeFile(join(temp, 'out/library.tgz.sha256'), `${digest}  library.tgz\n`);
 }
 
 describe('library workflow', () => {
@@ -621,7 +613,7 @@ describe('library workflow', () => {
     expect(a.facts.get('artifact.archive').state).toBe('present');
     expect(a.facts.get('artifact.archive.sha256').state).toBe('present');
     expect(a.profile.plans.publish.blocked(a.context())).toBe('');
-    expect(await Bun.file(join(temp, 'invocations.txt')).exists()).toBe(false);
+    expect(await Bun.file(join(temp, 'out/library.tgz')).exists()).toBe(false);
     a.openGated(a.profile.plans.publish);
     expect(a.modal.title).toBe('Validate package');
     await accept(a);
@@ -635,34 +627,71 @@ describe('library workflow', () => {
     expect(a.runner.result).toBe('done');
     expect(a.runner.jobs.map(job => job.id)).toEqual(['validate', 'upload']);
     expect(a.runner.logs.map(line => line.text)).toContain('package uploaded');
-    expect(await Bun.file(join(temp, 'invocations.txt')).exists()).toBe(false);
+    expect(await Bun.file(join(temp, 'out/published/library.tgz')).exists()).toBe(false);
   });
 
   test('packaging does not upload, and a real checksum opens publish', async () => {
-    await writeScript('release.sh');
     const a = await libraryApp({ demo: false });
     expect(a.profile.plans.publish.blocked(a.context())).toBe(publishBlocked);
     a.openRun(a.profile.plans.release);
     await accept(a);
     expect(a.runner.result).toBe('done');
-    expect(await readFile(join(temp, 'invocations.txt'), 'utf8')).toBe('test\npack\nchecksum\n');
-    expect(a.profile.plans.publish.blocked(a.context())).toBe(publishBlocked);
-    a.key('p', key('p'));
-    expect(a.modal).toBeNull();
-    await writeLibraryArchive();
-    await a.refresh();
+    expect(await readFile(join(temp, 'out/test.txt'), 'utf8')).toContain('1 pass');
+    const archive = await readFile(join(temp, 'out/library.tgz'));
+    const digest = createHash('sha256').update(archive).digest('hex');
+    const checksum = await readFile(join(temp, 'out/library.tgz.sha256'), 'utf8');
+    expect(checksum).toBe(`${digest}  library.tgz\n`);
+    const contents = Bun.spawn(['tar', '-tzf', join(temp, 'out/library.tgz')], { stdout: 'pipe', stderr: 'pipe' });
+    expect(await new Response(contents.stdout).text()).toBe('package.json\nlibrary.js\n');
+    expect(await contents.exited).toBe(0);
+    expect(await Bun.file(join(temp, 'out/published/library.tgz')).exists()).toBe(false);
     expect(a.facts.get('artifact.archive').state).toBe('present');
     expect(a.facts.get('artifact.archive.sha256')).toMatchObject({ state: 'verified', kind: 'checksum' });
     expect(a.profile.plans.publish.blocked(a.context())).toBe('');
     a.openGated(a.profile.plans.publish);
     await accept(a);
     expect(a.runner.result).toBe('paused');
-    expect(await readFile(join(temp, 'invocations.txt'), 'utf8')).toBe('test\npack\nchecksum\nvalidate\n');
+    expect(a.runner.jobs.map(job => job.status)).toEqual(['done', 'pending']);
+    expect(await Bun.file(join(temp, 'out/published/library.tgz')).exists()).toBe(false);
     a.openGated(a.profile.plans.publish);
     expect(a.modal.danger).toBe(true);
     await accept(a);
     expect(a.runner.result).toBe('done');
-    expect(await readFile(join(temp, 'invocations.txt'), 'utf8')).toBe('test\npack\nchecksum\nvalidate\nupload\n');
+    expect(a.runner.jobs.map(job => job.id)).toEqual(['validate', 'upload']);
+    expect(await readFile(join(temp, 'out/published/library.tgz'))).toEqual(archive);
+    expect(await readFile(join(temp, 'out/published/library.tgz.sha256'), 'utf8')).toBe(checksum);
+  });
+
+  test('a failing library test stops packaging and keeps publish blocked', async () => {
+    const a = await libraryApp({ demo: false });
+    await writeFile(join(temp, 'library.js'), 'export const add = () => 0;\n');
+    a.openRun(a.profile.plans.release);
+    await accept(a);
+    expect(a.runner.result).toBe('failed');
+    expect(a.runner.jobs.map(job => job.status)).toEqual(['failed', 'pending', 'pending']);
+    expect(a.facts.get('artifact.tested').state).toBe('missing');
+    expect(a.facts.get('artifact.archive').state).toBe('missing');
+    expect(a.profile.plans.publish.blocked(a.context())).toBe(publishBlocked);
+    expect(await Bun.file(join(temp, 'out/published/library.tgz')).exists()).toBe(false);
+  });
+
+  test('upload rejects a package changed after validation', async () => {
+    const a = await libraryApp({ demo: false });
+    a.openRun(a.profile.plans.release);
+    await accept(a);
+    expect(a.runner.result).toBe('done');
+    a.openGated(a.profile.plans.publish);
+    await accept(a);
+    expect(a.runner.result).toBe('paused');
+    await writeFile(join(temp, 'out/library.tgz'), 'changed after validation');
+    a.openGated(a.profile.plans.publish);
+    await accept(a);
+    expect(a.runner.result).toBe('failed');
+    expect(a.runner.jobs.map(job => job.status)).toEqual(['done', 'failed']);
+    expect(a.runner.logs.map(line => line.text).join('\n')).toContain('Package checksum does not match');
+    expect(a.facts.get('artifact.archive.sha256').state).toBe('mismatch');
+    expect(a.profile.plans.publish.blocked(a.context())).toBe(publishBlocked);
+    expect(await Bun.file(join(temp, 'out/published/library.tgz')).exists()).toBe(false);
   });
 
   test('a snapshot of the example directory shows the library header', async () => {

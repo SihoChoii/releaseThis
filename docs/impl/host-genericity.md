@@ -10,6 +10,8 @@ Phase 6 is the proof that a second workflow runs on this cockpit. Phase 7, movin
 
 `1` starts release. `2` and `p` start publish. The log hint still says `P publish`. That string is host chrome, and this profile binds `p`, so the hint matches. Adding the fixture did not change the cockpit or the runner. [`src/release/view.js`](../../src/release/view.js), [`src/release/app.js`](../../src/release/app.js), and [`src/tui/runner.js`](../../src/tui/runner.js) do not branch on profile id.
 
+The fixture includes an executable `release.sh` backed by `release.js` and a small library test suite. Real mode saves test output, creates a gzip tar archive, and generates its SHA-256 sidecar. Validation checks the digest and archive. Upload revalidates and copies both files into the local `out/published/` directory. The integration test copies this complete fixture and runs its backend; it does not substitute a script or create release artifacts itself. See the [example instructions](../../examples/library/README.md).
+
 ## Still open
 
 Phase 7 moves the HoldThis profile into the HoldThis repo, leaves a reference profile on the order of `examples/holdthis`, and lets a foreign repo depend on `releasethis` without HoldThis files at runtime.
