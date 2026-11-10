@@ -7,7 +7,7 @@ import { App } from '../src/release/app.js';
 import { render } from '../src/release/view.js';
 import { checksumOK, holdthis } from '../examples/holdthis/profile.js';
 import { factStore, resolvePlan } from '../src/workflow/model.js';
-import { abortError, refreshFacts, verifyChecksum } from '../src/workflow/refresh.js';
+import { abortError, checksumProbe, refreshFacts, verifyChecksum } from '../src/workflow/refresh.js';
 
 let temp;
 beforeEach(async () => { temp = await mkdtemp(join(tmpdir(), 'releasethis-refresh-')); });
@@ -466,6 +466,46 @@ describe('streaming checksums', () => {
     await writeFile(sha, `${digest}  other.tar\n`);
     expect(await verifyChecksum(archive, sha)).toBe(false);
     expect(await checksumOK(archive, sha)).toBe(false);
+  });
+
+  test('preserves spaces in a recorded checksum filename', async () => {
+    const archive = join(temp, 'My App.zip');
+    const sha = join(temp, 'My App.zip.sha256');
+    await writeFile(archive, 'abc');
+    const digest = createHash('sha256').update('abc').digest('hex');
+    expect(digest).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+    await writeFile(sha, `${digest}  My App.zip\n`);
+    expect(await verifyChecksum(archive, sha)).toBe(true);
+
+    const plain = join(temp, 'app.zip');
+    const plainSha = join(temp, 'app.zip.sha256');
+    await writeFile(plain, 'abc');
+    await writeFile(plainSha, `${digest}  app.zip\n`);
+    expect(await verifyChecksum(plain, plainSha)).toBe(true);
+
+    await writeFile(sha, `${digest}  My\n`);
+    expect(await verifyChecksum(archive, sha)).toBe(false);
+    await writeFile(sha, `${digest}  My App.tar\n`);
+    expect(await verifyChecksum(archive, sha)).toBe(false);
+    await writeFile(sha, `${'0'.repeat(64)}  My App.zip\n`);
+    expect(await verifyChecksum(archive, sha)).toBe(false);
+
+    await writeFile(archive, 'abcd');
+    await writeFile(sha, `${digest}  My App.zip\n`);
+    expect(await verifyChecksum(archive, sha)).toBe(false);
+
+    await writeFile(archive, 'abc');
+    const probe = checksumProbe(
+      { key: 'artifact.archive.sha256', label: 'Checksum', path: 'My App.zip.sha256', kind: 'checksum' },
+      { path: 'My App.zip' },
+      desc => ({ key: desc.key, kind: desc.kind, label: desc.label, path: desc.path }),
+    );
+    const facts = factStore();
+    await probe.run({ root: temp, facts });
+    expect(facts.get('artifact.archive.sha256').state).toBe('verified');
+    await writeFile(archive, 'tampered');
+    await probe.run({ root: temp, facts });
+    expect(facts.get('artifact.archive.sha256').state).toBe('mismatch');
   });
 
   test('abort stops the read', async () => {
