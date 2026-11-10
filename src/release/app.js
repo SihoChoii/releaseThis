@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { Runner } from '../tui/runner.js';
-import { assertProfileBindings, factsFromWorkspace, materialize, openingParams, project, resolvePlan } from '../workflow/model.js';
+import { assertProfileBindings, factsFromWorkspace, materialize, openingParams, planBlock, project, resolvePlan } from '../workflow/model.js';
 import { refreshFacts } from '../workflow/refresh.js';
 
 export class App {
@@ -50,6 +50,11 @@ export class App {
   activeFormPlan(modal = this.modal) {
     const plan = modal?.planId ? this.profile.plans[modal.planId] : null;
     return plan?.kind === 'form' ? plan : this.formPlan();
+  }
+  formParams(plan, modal = this.modal) {
+    const params = {};
+    for (const field of plan?.fields || []) params[field.name] = String(modal?.[field.name] ?? '').trim();
+    return params;
   }
   gatedPlan() { return Object.values(this.profile.plans).find(plan => plan.kind === 'gated'); }
   homeActions() { return this.profile.actions.filter(action => action.home); }
@@ -145,7 +150,9 @@ export class App {
     try {
       const defaults = openingParams(plan, this.facts);
       const first = plan.fields[0];
-      this.modal = { type: 'release', planId: plan.id, ...defaults, field: 0, cursor: String(defaults[first.name] ?? '').length, error: '', preset: 0 };
+      const draft = { type: 'release', planId: plan.id, ...defaults, field: 0, cursor: String(defaults[first.name] ?? '').length, error: '', preset: 0 };
+      draft.error = planBlock(plan, this.context(this.formParams(plan, draft)));
+      this.modal = draft;
     } catch (error) { this.notify(error.message); }
   }
 
@@ -153,9 +160,13 @@ export class App {
     if (!this.canStartAction()) return;
     const draft = { ...this.modal };
     const plan = this.activeFormPlan(draft);
-    const params = {};
-    for (const field of plan.fields) params[field.name] = String(draft[field.name] ?? '').trim();
+    const params = this.formParams(plan, draft);
     const ctx = this.context(params);
+    const blocked = planBlock(plan, ctx);
+    if (blocked) {
+      this.modal.error = blocked;
+      return this.notify(blocked);
+    }
     try {
       const jobs = resolvePlan(plan, ctx);
       if (!jobs.length) {
@@ -163,9 +174,17 @@ export class App {
         return this.notify('Nothing to run.');
       }
       const review = plan.review(ctx, jobs);
-      this.confirm(review.title, review.lines, review.accept, () => this.start(jobs, undefined, [], {
-        planId: plan.id, params, resume: plan.resume || null,
-      }));
+      const start = () => {
+        const reason = planBlock(plan, this.context(params));
+        if (reason) {
+          this.modal = { ...draft, error: reason };
+          return this.notify(reason);
+        }
+        return this.start(jobs, undefined, [], {
+          planId: plan.id, params, resume: plan.resume || null,
+        });
+      };
+      this.confirm(review.title, review.lines, review.accept, start);
       this.modal.back = () => { this.modal = draft; };
     } catch (error) { this.modal.error = error.message; }
   }
@@ -281,7 +300,7 @@ export class App {
       for (const field of plan.fields) if (Object.hasOwn(next, field.name)) modal[field.name] = next[field.name];
       const field = plan.fields[modal.field] || plan.fields[0];
       modal.cursor = String(modal[field.name] ?? '').length;
-      modal.error = '';
+      modal.error = planBlock(plan, this.context(this.formParams(plan, modal)));
     } catch (error) { modal.error = error.message; }
   }
 
