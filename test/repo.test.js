@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { parseGithubRepo, detectGithubRepo } from '../src/release/repo.js';
 import { App } from '../src/release/app.js';
 import { render } from '../src/release/view.js';
-import { holdthis } from '../src/profiles/holdthis.js';
+import { holdthis } from '../examples/holdthis/profile.js';
 
 describe('parseGithubRepo', () => {
   test('parses HTTPS, SSH, and ssh:// forms with optional .git', () => {

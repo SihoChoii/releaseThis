@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { App } from '../src/release/app.js';
 import { render } from '../src/release/view.js';
-import { checksumOK, holdthis } from '../src/profiles/holdthis.js';
+import { checksumOK, holdthis } from '../examples/holdthis/profile.js';
 import { factStore, resolvePlan } from '../src/workflow/model.js';
 import { abortError, refreshFacts, verifyChecksum } from '../src/workflow/refresh.js';
 
@@ -411,7 +411,7 @@ setInterval(() => {}, 1000);
       const runtime = join(temp, 'cockpit.js');
       await writeFile(runtime, `
 import { App } from ${JSON.stringify(new URL('../src/release/app.js', import.meta.url).href)};
-import { holdthis } from ${JSON.stringify(new URL('../src/profiles/holdthis.js', import.meta.url).href)};
+import { holdthis } from ${JSON.stringify(new URL('../examples/holdthis/profile.js', import.meta.url).href)};
 import { runCockpit } from ${JSON.stringify(new URL('../src/tui/runtime.js', import.meta.url).href)};
 process.stdin.setRawMode = () => {};
 await runCockpit({

@@ -1,10 +1,15 @@
 {
   "name": "releasethis",
+  "version": "0.0.0",
   "private": true,
   "description": "Release cockpit TUI for driving a project's release script",
   "type": "module",
   "bin": {
     "releasethis": "./bin/cli.js"
+  },
+  "exports": {
+    "./workflow": "./src/workflow/model.js",
+    "./refresh": "./src/workflow/refresh.js"
   },
   "files": [
     "bin/",
@@ -12,8 +17,8 @@
     "README.md"
   ],
   "scripts": {
-    "tui": "bun bin/cli.js",
-    "tui:demo": "bun bin/cli.js --demo",
+    "tui": "cd examples/holdthis && bun ../../bin/cli.js",
+    "tui:demo": "cd examples/holdthis && bun ../../bin/cli.js --demo",
     "test": "bun test test",
     "test:tui": "bun test test"
   },

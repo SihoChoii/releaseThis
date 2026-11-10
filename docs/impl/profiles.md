@@ -1,8 +1,8 @@
 # Profiles
 
-The host loads `releasethis.config.js` from the working directory. The file is ESM and default-exports either a declarative object or `host => { ... }`. There is one profile per repo. The loader does not read JSON, `package.json`, or a `--profile` flag.
+The host loads `releasethis.config.js` from the working directory. The file is ESM and default-exports a declarative object, `host => { ... }`, or a finished profile whose `tasks` and `plans` are objects rather than arrays. There is one profile per repo. The loader does not read JSON, `package.json`, or a `--profile` flag.
 
-A missing file opens an empty cockpit that names `releasethis.config.js`. It does not show the HoldThis pipeline. The exception is this package: when its own config file is absent, `bin/cli.js` still registers the in-process HoldThis profile. An invalid file opens the same empty cockpit and names the problem. `Q`, Tab, and `?` still work.
+A missing file opens an empty cockpit that names `releasethis.config.js`. It does not show the HoldThis pipeline, including when the working directory is this package. An invalid file, including a finished profile missing runtime fields or descriptor shapes, opens the same empty cockpit and names the problem. `Q`, Tab, and `?` still work. A complete finished profile is returned after those checks and its key bindings. [`examples/holdthis`](../../examples/holdthis/releasethis.config.js) registers that way.
 
 ## Declarative object
 

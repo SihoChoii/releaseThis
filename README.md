@@ -2,7 +2,7 @@
 
 Standalone home for the releaseThis release cockpit TUI, lifted here for independent development.
 
-This is a Bun + JavaScript terminal UI that drives a project’s release script. The current code still mirrors HoldThis’s pipeline and `./script/release.sh` backend. The plan for a plugin-based host that other repos adapt with their own profiles is in [`docs/architecture.md`](docs/architecture.md). The work to get there is listed in [`docs/implementation.md`](docs/implementation.md).
+This is a Bun + JavaScript terminal cockpit. A project adapts it with `releasethis.config.js`. A directory with no config opens an empty cockpit. `bun run tui:demo` runs the HoldThis reference profile in [`examples/holdthis`](examples/holdthis). The plan is in [`docs/architecture.md`](docs/architecture.md). The work to get there is listed in [`docs/implementation.md`](docs/implementation.md).
 
 ## Requirements
 
@@ -24,13 +24,12 @@ The CLI uses the current working directory as the host project root. It reads `g
 ## Run (this repo)
 
 ```sh
-bun run tui:demo        # Interactive demo (no files changed)
-bun run tui             # Real mode (expects a host project’s script/release.sh)
-bun run tui --snapshot  # One plain-text frame, then exit
+bun run tui:demo        # Demo the reference profile in examples/holdthis
+bun run tui             # Same profile, real mode
 bun run test            # Cockpit tests
 ```
 
-Or: `./script/release_tui.sh [--demo] [--snapshot] [--no-motion]`
+`./script/release_tui.sh` uses the current directory. This repo's root has no profile, so that command opens the empty cockpit. Real HoldThis releases run in the HoldThis repo, which owns `script/release.sh`.
 
 See [`src/release/README.md`](src/release/README.md) for the full cockpit design and keybindings.
 
@@ -38,5 +37,7 @@ See [`src/release/README.md`](src/release/README.md) for the full cockpit design
 
 - `bin/cli.js` — public entrypoint (`releasethis` bin)
 - `src/tui/` — reusable terminal primitives (paint, runner, logs, runtime)
-- `src/release/` — release cockpit product UI and HoldThis-shaped pipeline model
+- `src/release/` — cockpit session and views
+- `examples/holdthis/` — reference HoldThis profile
+- `examples/library/` — a second workflow with no HoldThis steps
 - `test/` — cockpit tests

@@ -7,7 +7,7 @@ import { App } from '../src/release/app.js';
 import { Runner, cleanOutput, takeStatusLine } from '../src/tui/runner.js';
 import { createFrameClock } from '../src/tui/frame.js';
 import { visibleLogs } from '../src/tui/logs.js';
-import { holdthis, checksumOK } from '../src/profiles/holdthis.js';
+import { holdthis, checksumOK } from '../examples/holdthis/profile.js';
 import { openingParams, planBlock, requirement, resolvePlan } from '../src/workflow/model.js';
 import { render, fit, spinner } from '../src/release/view.js';
 

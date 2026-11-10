@@ -1,6 +1,6 @@
 // Load a repo profile from releasethis.config.js. The cockpit renders the compiled profile.
 
-import { realpath, stat } from 'node:fs/promises';
+import { stat } from 'node:fs/promises';
 import { isAbsolute, join, normalize, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { assertProfileBindings, factStore, fieldTypes, materialize } from './model.js';
@@ -40,6 +40,9 @@ const fieldMessages = {
 };
 
 const isObject = value => !!value && typeof value === 'object' && !Array.isArray(value);
+function isFinishedProfile(value) {
+  return isObject(value) && isObject(value.tasks) && isObject(value.plans);
+}
 const token = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value);
 
 function relativeInside(value) {
@@ -552,6 +555,163 @@ class ProfileHost {
   }
 }
 
+function finishedProfileProblems(profile) {
+  const problems = [];
+  const problem = message => { if (!problems.includes(message)) problems.push(message); };
+  if (!token(profile.id)) problem('Profile id must be a short token.');
+  if (!isObject(profile.header)) problem('header must be an object.');
+  else if (typeof profile.header.subtitle !== 'string' || !profile.header.subtitle) problem('header.subtitle must be text.');
+  if (typeof profile.commandLine !== 'function') problem('commandLine must be a function.');
+  if (typeof profile.demoFacts !== 'function') problem('demoFacts must be a function.');
+  if (profile.inspect != null && typeof profile.inspect !== 'function') problem('inspect must be a function.');
+  if (profile.demoTag != null && typeof profile.demoTag !== 'function') problem('demoTag must be a function.');
+  if (profile.problems != null && (!Array.isArray(profile.problems) || profile.problems.some(line => typeof line !== 'string'))) {
+    problem('problems must be a list of text.');
+  }
+  if (profile.script != null && !relativeInside(profile.script)) problem('script must stay inside the repo.');
+  if (!Array.isArray(profile.probes)) problem('probes must be a list.');
+  else {
+    for (const probe of profile.probes) {
+      if (!isObject(probe) || typeof probe.id !== 'string' || !probe.id) { problem('A probe is missing an id.'); continue; }
+      if (typeof probe.run !== 'function') problem(`Probe "${probe.id}" needs a run function.`);
+      if (probe.facts != null && (!Array.isArray(probe.facts) || probe.facts.some(key => !token(key)))) {
+        problem(`Probe "${probe.id}" facts must be a list of fact keys.`);
+      }
+      if (probe.demo != null && typeof probe.demo !== 'function') problem(`Probe "${probe.id}" demo must be a function.`);
+    }
+  }
+  if (!isObject(profile.copy)) problem('copy must be an object.');
+  else {
+    for (const key of Object.keys(defaultCopy)) {
+      if (typeof profile.copy[key] !== 'string' || !profile.copy[key]) problem(`copy.${key} must be text.`);
+    }
+    if (profile.copy.signed != null && typeof profile.copy.signed !== 'function') problem('copy.signed must be a function.');
+  }
+  const artifactKeys = new Set();
+  if (!Array.isArray(profile.artifacts)) problem('artifacts must be a list.');
+  else {
+    for (const artifact of profile.artifacts) {
+      if (!isObject(artifact) || !token(artifact.key)) { problem('An artifact is missing a key.'); continue; }
+      if (artifactKeys.has(artifact.key)) problem(`Artifact "${artifact.key}" is declared more than once.`);
+      artifactKeys.add(artifact.key);
+      if (typeof artifact.label !== 'string' || !artifact.label) problem(`Artifact "${artifact.key}" needs a label.`);
+      if (!relativeInside(artifact.path)) problem(`Artifact "${artifact.key}" path must stay inside the repo.`);
+      const kind = artifact.kind || 'file';
+      if (!['file', 'dir', 'checksum'].includes(kind)) problem(`Artifact "${artifact.key}" has unknown kind "${kind}".`);
+    }
+    for (const artifact of profile.artifacts) {
+      if (isObject(artifact) && artifact.kind === 'checksum' && artifact.archive && !artifactKeys.has(artifact.archive)) {
+        problem(`Artifact "${artifact.key}" names unknown archive "${artifact.archive}".`);
+      }
+    }
+  }
+  const described = new Set();
+  const describeTask = task => {
+    if (described.has(task)) return;
+    described.add(task);
+    if (typeof task.label !== 'string' || !task.label) problem(`Task "${task.id}" needs a label.`);
+    if (task.detail != null && typeof task.detail !== 'string') problem(`Task "${task.id}" detail must be text.`);
+    if (task.group != null && typeof task.group !== 'string') problem(`Task "${task.id}" group must be text.`);
+    if (task.skip != null && typeof task.skip !== 'function') problem(`Task "${task.id}" skip must be a function.`);
+    if (task.requires != null && typeof task.requires !== 'function') problem(`Task "${task.id}" requires must be a function.`);
+    if (task.args != null && typeof task.args !== 'function') problem(`Task "${task.id}" args must be a function.`);
+    if (task.command != null && typeof task.command !== 'function') problem(`Task "${task.id}" command must be a function.`);
+    if (task.applyDemo != null && typeof task.applyDemo !== 'function') problem(`Task "${task.id}" applyDemo must be a function.`);
+    if (task.onDone != null && typeof task.onDone !== 'function') problem(`Task "${task.id}" onDone must be a function.`);
+    if (task.demo != null && typeof task.demo !== 'function' && !Array.isArray(task.demo)) problem(`Task "${task.id}" demo must be a list of lines.`);
+  };
+  if (!Array.isArray(profile.catalog)) problem('catalog must be a list.');
+  else {
+    profile.catalog.forEach((task, index) => {
+      if (!isObject(task) || !token(task.id)) { problem(`Catalog entry ${index + 1} is missing an id.`); return; }
+      if (!Object.hasOwn(profile.tasks, task.id)) problem(`Catalog task "${task.id}" is not in tasks.`);
+      describeTask(task);
+    });
+  }
+  for (const [key, task] of Object.entries(profile.tasks)) {
+    if (!isObject(task)) { problem(`Task "${key}" must be an object.`); continue; }
+    if (!token(task.id)) problem(`Task "${key}" is missing an id.`);
+    else if (task.id !== key) problem(`Task "${key}" id does not match its key.`);
+    else describeTask(task);
+  }
+  for (const [key, plan] of Object.entries(profile.plans)) {
+    if (!isObject(plan)) { problem(`Plan "${key}" must be an object.`); continue; }
+    const id = token(plan.id) ? plan.id : key;
+    if (!token(plan.id)) problem(`Plan "${key}" is missing an id.`);
+    else if (plan.id !== key) problem(`Plan "${key}" id does not match its key.`);
+    if (!['run', 'form', 'gated'].includes(plan.kind)) { problem(`Plan "${id}" kind must be run, form, or gated.`); continue; }
+    if (typeof plan.resolve !== 'function') problem(`Plan "${id}" needs a resolve function.`);
+    if ((plan.kind === 'run' || plan.kind === 'form') && typeof plan.review !== 'function') problem(`Plan "${id}" needs a review function.`);
+    if (plan.kind === 'form') {
+      if (!Array.isArray(plan.fields) || !plan.fields.length) problem(`Plan "${id}" needs at least one field.`);
+      else {
+        for (const field of plan.fields) {
+          if (!isObject(field) || !token(field.name)) { problem(`Plan "${id}" has a field without a name.`); continue; }
+          if (!Object.hasOwn(fieldTypes, field.type)) problem(`Plan "${id}" field "${field.name}" has unknown type "${field.type}".`);
+          if (field.label != null && typeof field.label !== 'string') problem(`Plan "${id}" field "${field.name}" label must be text.`);
+        }
+      }
+      if (!Array.isArray(plan.presets) || !plan.presets.length) problem(`Plan "${id}" needs at least one preset.`);
+      else {
+        for (const [index, preset] of plan.presets.entries()) {
+          const name = (isObject(preset) && preset.name) || index + 1;
+          if (!isObject(preset) || typeof preset.apply !== 'function') problem(`Plan "${id}" preset "${name}" needs an apply function.`);
+        }
+      }
+      if (plan.validate != null && typeof plan.validate !== 'function') problem(`Plan "${id}" validate must be a function.`);
+      if (plan.hint != null && typeof plan.hint !== 'function') problem(`Plan "${id}" hint must be a function.`);
+    }
+    if (plan.kind === 'gated') {
+      if (typeof plan.blocked !== 'function') problem(`Plan "${id}" needs a blocked function.`);
+      if (typeof plan.confirmStart !== 'function') problem(`Plan "${id}" needs a confirmStart function.`);
+      if (!Array.isArray(plan.steps) || plan.steps.length < 2) problem(`Plan "${id}" needs a validation step and a confirmed step.`);
+    }
+    if (Array.isArray(plan.steps)) {
+      plan.steps.forEach((step, index) => {
+        const taskId = typeof step === 'string' ? step : step?.taskId || step?.task;
+        const where = `Plan "${id}" step ${index + 1}`;
+        if (typeof taskId !== 'string' || !taskId) problem(`${where} is missing a task.`);
+        else if (!Object.hasOwn(profile.tasks, taskId)) problem(`${where} names unknown task "${taskId}".`);
+        if (!isObject(step) && typeof step !== 'string') problem(`${where} must name a task.`);
+        if (isObject(step) && step.after != null && step.after !== 'pause') problem(`${where} has unknown after "${step.after}".`);
+        if (isObject(step) && step.confirm != null && typeof step.confirm !== 'function') problem(`${where} confirm must be a function.`);
+      });
+    }
+  }
+  if (!Array.isArray(profile.actions)) problem('actions must be a list.');
+  else {
+    const seen = new Set();
+    for (const action of profile.actions) {
+      if (!isObject(action) || !token(action.id)) { problem('An action is missing an id.'); continue; }
+      if (seen.has(action.id)) problem(`Action "${action.id}" is declared more than once.`);
+      seen.add(action.id);
+      if (action.plan != null && !Object.hasOwn(profile.plans, action.plan)) problem(`Action "${action.id}" names unknown plan "${action.plan}".`);
+      if (action.bindings != null && !Array.isArray(action.bindings)) problem(`Action "${action.id}" bindings must be a list.`);
+      else if (Array.isArray(action.bindings)) {
+        for (const binding of action.bindings) {
+          const key = typeof binding === 'string' ? binding : binding?.key;
+          if (typeof key !== 'string' || !key) problem(`Action "${action.id}" has a binding without a key.`);
+        }
+      }
+      if (action.label != null && typeof action.label !== 'string') problem(`Action "${action.id}" label must be text.`);
+      if (action.detail != null && typeof action.detail !== 'string') problem(`Action "${action.id}" detail must be text.`);
+      if (action.detailFor != null && typeof action.detailFor !== 'function') problem(`Action "${action.id}" detailFor must be a function.`);
+    }
+  }
+  if (profile.mode != null) {
+    const spec = profile.mode;
+    if (!isObject(spec)) problem('Mode must be an object.');
+    else {
+      const chip = spec.chip || {};
+      const sidebar = spec.sidebar || {};
+      const resume = spec.resume || {};
+      const text = [chip.on, chip.off, sidebar.on, sidebar.off, sidebar.hint, resume.on, resume.off];
+      if (!text.every(item => typeof item === 'string' && item)) problem('Mode is missing chip, sidebar, or resume text.');
+    }
+  }
+  return problems;
+}
+
 export async function loadProfile(root) {
   const file = join(root, PROFILE_FILE);
   let info;
@@ -564,6 +724,13 @@ export async function loadProfile(root) {
   try {
     const imported = await import(pathToFileURL(file).href);
     const exported = imported.default;
+    if (isFinishedProfile(exported)) {
+      const problems = finishedProfileProblems(exported);
+      if (problems.length) return failed(problems);
+      try { assertProfileBindings(exported); }
+      catch (error) { return failed([error.message.split('\n')[0]]); }
+      return { found: true, ok: true, problems: [], profile: exported };
+    }
     const host = new ProfileHost();
     if (typeof exported === 'function') await exported(host.facade());
     else if (isObject(exported)) host.apply(exported);
@@ -575,15 +742,8 @@ export async function loadProfile(root) {
   }
 }
 
-async function sameDirectory(left, right) {
-  try { return await realpath(left) === await realpath(right); }
-  catch { return false; }
-}
-
-// HoldThis is the fallback only for this package. Every other directory gets the loaded profile or the empty cockpit.
-export async function profileForDirectory(root, { packageRoot, fallback } = {}) {
+// Every directory gets the loaded profile or the empty cockpit.
+export async function profileForDirectory(root) {
   const loaded = await loadProfile(root);
-  if (loaded.ok) return loaded.profile;
-  if (!loaded.found && packageRoot && fallback && await sameDirectory(root, packageRoot)) return fallback;
   return loaded.profile;
 }

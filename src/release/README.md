@@ -40,7 +40,8 @@ Release editing, command search, review, help, artifact inspection, and cancella
 ## Implementation
 
 - `bin/cli.js`: CLI flags, profile loading, and wiring into the cockpit runtime.
-- `src/workflow/load.js`: loads `releasethis.config.js` from the working directory. This package still opens the HoldThis profile when that file is absent.
+- `src/workflow/load.js`: loads `releasethis.config.js` from the working directory. A missing file opens an empty cockpit. A finished profile, whose `tasks` and `plans` are objects, is returned after its runtime fields, descriptor shapes, and key bindings are checked.
+- `examples/holdthis`: the reference HoldThis profile. `bun run tui:demo` runs it.
 - `examples/library`: a second workflow. It tests, packs, checksums, and publishes, and it has no HoldThis steps.
 - `src/workflow/refresh.js`: runs profile probes off the key path, isolates a failed probe, and streams checksum verification.
 - `src/tui/runtime.js`: terminal lifecycle, raw keyboard input, resize handling, and differential drawing.
@@ -48,7 +49,7 @@ Release editing, command search, review, help, artifact inspection, and cancella
 - `src/release/app.js`: navigation, forms, action review, and publish validation flow.
 - `src/release/view.js`: responsive workspace, readiness, artifacts, pipeline, and task status.
 - `src/release/dialogs.js`: scrollable overlays for palette, forms, help, and confirmations.
-- `src/workflow/model.js` and `src/profiles/holdthis.js`: facts, tasks, and plans. The HoldThis profile owns checksum validation, plist inspection, prerequisites, and release planning.
+- `src/workflow/model.js` and `examples/holdthis/profile.js`: facts, tasks, and plans. The HoldThis profile owns checksum validation, plist inspection, prerequisites, and release planning. The package exports those helpers as `releasethis/workflow` and `releasethis/refresh`.
 - `test/tui.test.js`, `test/profile.test.js`, and `test/refresh.test.js`: planning, keyboard, profile loading, workspace refresh, and child-process tests.
 
 Real actions invoke `script/release.sh` with an argument array. The shell backend still performs signing, notarization, Gatekeeper checks, release validation, and GitHub upload. Tool output is stripped of terminal control sequences. Output retains the latest 2,500 lines for the current session. Cancellation sends SIGTERM to the entire process group and escalates to SIGKILL after three seconds if needed. Completed files and version edits are retained so individual steps can be rerun.

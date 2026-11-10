@@ -2,8 +2,8 @@ import { join } from 'node:path';
 import { stat } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { factStore, fieldTypes, materialize, project, sameVersion } from '../workflow/model.js';
-import { checksumProbe, fileProbe, refreshFacts, verifyChecksum } from '../workflow/refresh.js';
+import { factStore, fieldTypes, materialize, project, sameVersion } from '../../src/workflow/model.js';
+import { checksumProbe, fileProbe, refreshFacts, verifyChecksum } from '../../src/workflow/refresh.js';
 
 const exec = promisify(execFile);
 const explain = {

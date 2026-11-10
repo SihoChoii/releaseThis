@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { App } from '../src/release/app.js';
-import { holdthis } from '../src/profiles/holdthis.js';
+import { holdthis } from '../examples/holdthis/profile.js';
 import { render } from '../src/release/view.js';
 import { requirement, resolvePlan } from '../src/workflow/model.js';
 import { loadProfile, profileForDirectory } from '../src/workflow/load.js';
@@ -531,15 +531,14 @@ describe('missing and invalid profiles', () => {
     expect(loaded.problems.join('\n')).toContain('field "channel" has unknown type "choice"');
   });
 
-  test('HoldThis is the fallback only for this package root', async () => {
-    const fallback = { id: 'fallback' };
-    expect(await profileForDirectory(temp, { packageRoot: temp, fallback })).toBe(fallback);
-    expect((await profileForDirectory(temp, { packageRoot, fallback })).id).toBe('empty');
+  test('a directory with no config is the empty cockpit', async () => {
+    expect((await profileForDirectory(temp)).id).toBe('empty');
+    expect((await profileForDirectory(packageRoot)).id).toBe('empty');
     await writeProfile(stepsProfile);
-    expect((await profileForDirectory(temp, { packageRoot: temp, fallback })).id).toBe('sample');
+    expect((await profileForDirectory(temp)).id).toBe('sample');
   });
 
-  test('a snapshot of this package still shows the HoldThis header', async () => {
+  test('a snapshot of this package shows the empty cockpit', async () => {
     const proc = Bun.spawn(['bun', 'bin/cli.js', '--demo', '--snapshot'], {
       cwd: packageRoot,
       stdout: 'pipe',
@@ -552,8 +551,181 @@ describe('missing and invalid profiles', () => {
       proc.exited,
     ]);
     if (code !== 0) throw new Error(stderr || stdout);
+    expect(stdout).toContain('releasethis.config.js');
+    expect(stdout).toContain('no profile');
+    expect(stdout).not.toContain('Apple Silicon');
+    expect(stdout).not.toContain('Build app');
+  });
+});
+
+function finishedRuntime({ tasks = '{}', plans = '{}' } = {}) {
+  return `export default {
+    id: 'sample',
+    header: { subtitle: 'Sample' },
+    commandLine(args) { return (args || []).join(' '); },
+    demoFacts() { return { get() { return null; }, all() { return []; }, set() {} }; },
+    probes: [],
+    copy: {
+      refreshing: 'Reading workspace…',
+      checked: 'R refreshes files',
+      demoIdle: 'All release actions are simulated',
+      intro: 'Ready.',
+      aligned: 'Review the artifacts, then run a plan.',
+      drifted: 'Source has changed.',
+      publishReady: 'Publish when ready.',
+      files: 'Files',
+      legend: 'Present = on disk.',
+      artifactHint: 'Enter shows the full path.',
+      stepsIntro: 'Choose a step to inspect and run.',
+      stepsReady: 'Enter to review this step before running it.',
+      stepsBlocked: 'Complete the prerequisite, then refresh with R.',
+      tip: 'Tip: press / to find any command.',
+    },
+    artifacts: [],
+    catalog: [],
+    tasks: ${tasks},
+    plans: ${plans},
+    actions: [],
+  };
+`;
+}
+
+describe('finished profiles', () => {
+  test('accepts a complete runtime profile', async () => {
+    const loaded = await writeProfile(finishedRuntime());
+    expect(loaded.ok).toBe(true);
+    expect(loaded.problems).toEqual([]);
+    expect(loaded.profile.id).toBe('sample');
+  });
+
+  test('an incomplete finished profile opens the error cockpit', async () => {
+    const loaded = await writeProfile(`export default { id: 'broken', tasks: {}, plans: {} };\n`);
+    expect(loaded.ok).toBe(false);
+    expect(loaded.problems).toEqual([
+      'header must be an object.',
+      'commandLine must be a function.',
+      'demoFacts must be a function.',
+      'probes must be a list.',
+      'copy must be an object.',
+      'artifacts must be a list.',
+      'catalog must be a list.',
+      'actions must be a list.',
+    ]);
+    let quit = false;
+    const a = new App({ root: temp, demo: true, profile: loaded.profile, onQuit: () => { quit = true; } });
+    await a.refresh();
+    expect(screen(a)).toContain('header must be an object.');
+    expect(screen(a)).toContain('profile problem');
+    a.key('', key('tab'));
+    a.key('?', key('?'));
+    expect(screen(a)).toContain('Keyboard controls');
+    a.key('', key('escape'));
+    a.key('q');
+    expect(quit).toBe(true);
+
+    const proc = Bun.spawn(['bun', join(packageRoot, 'bin/cli.js'), '--demo', '--snapshot'], {
+      cwd: temp,
+      stdout: 'pipe',
+      stderr: 'pipe',
+      env: { ...process.env, NO_COLOR: '1' },
+    });
+    const [stdout, stderr, code] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    if (code !== 0) throw new Error(stderr || stdout);
+    expect(stdout).toContain('header must be an object.');
+    expect(stdout).toContain('profile problem');
+  });
+
+  test('rejects a task that is not a descriptor', async () => {
+    const loaded = await writeProfile(finishedRuntime({ tasks: '{ build: null }' }));
+    expect(loaded.ok).toBe(false);
+    expect(loaded.problems).toContain('Task "build" must be an object.');
+  });
+
+  test('rejects a plan without a kind', async () => {
+    const loaded = await writeProfile(finishedRuntime({ plans: '{ release: { id: "release" } }' }));
+    expect(loaded.ok).toBe(false);
+    expect(loaded.problems.join(' ')).toContain('Plan "release" kind must be run, form, or gated.');
+  });
+});
+
+describe('holdthis reference profile', () => {
+  test('loads the finished profile and its six catalog tasks', async () => {
+    const loaded = await loadProfile(join(packageRoot, 'examples/holdthis'));
+    expect(loaded.ok).toBe(true);
+    expect(loaded.profile.id).toBe('holdthis');
+    expect(loaded.profile.catalog.map(task => task.label)).toEqual([
+      'Build app', 'Sign app', 'Notarize app', 'Updater archive', 'Installer image', 'Verify checksums',
+    ]);
+  });
+
+  test('a snapshot of the reference profile shows the HoldThis header', async () => {
+    const proc = Bun.spawn(['bun', join(packageRoot, 'bin/cli.js'), '--demo', '--snapshot'], {
+      cwd: join(packageRoot, 'examples/holdthis'),
+      stdout: 'pipe',
+      stderr: 'pipe',
+      env: { ...process.env, NO_COLOR: '1' },
+    });
+    const [stdout, stderr, code] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    if (code !== 0) throw new Error(stderr || stdout);
     expect(stdout).toContain('Apple Silicon');
     expect(stdout).toContain('Build app');
+  });
+});
+
+describe('package boundary', () => {
+  test('a packed install runs a foreign profile and omits HoldThis', async () => {
+    const packDir = await mkdtemp(join(tmpdir(), 'releasethis-pack-'));
+    try {
+      const packed = Bun.spawn(['bun', 'pm', 'pack', '--destination', packDir, '--quiet'], {
+        cwd: packageRoot, stdout: 'pipe', stderr: 'pipe',
+      });
+      const [packOut, packErr, packCode] = await Promise.all([
+        new Response(packed.stdout).text(), new Response(packed.stderr).text(), packed.exited,
+      ]);
+      if (packCode !== 0) throw new Error(packErr || packOut);
+      const archive = join(packDir, 'releasethis-0.0.0.tgz');
+      const listed = Bun.spawn(['tar', '-tf', archive], { stdout: 'pipe', stderr: 'pipe' });
+      const names = await new Response(listed.stdout).text();
+      if (await listed.exited !== 0) throw new Error(names);
+      expect(names).not.toMatch(/holdthis/i);
+      expect(names).not.toContain('examples/');
+      const extract = join(packDir, 'extract');
+      await mkdir(extract);
+      const untar = Bun.spawn(['tar', '-xzf', archive, '-C', extract], { stdout: 'pipe', stderr: 'pipe' });
+      const untarErr = await new Response(untar.stderr).text();
+      if (await untar.exited !== 0) throw new Error(untarErr);
+      const project = join(packDir, 'project');
+      await mkdir(project);
+      await writeFile(join(project, 'releasethis.config.js'), `export default {
+        id: 'foreign',
+        header: { subtitle: 'Foreign' },
+        tasks: [{ id: 'check', label: 'Check', detail: 'Check', argv: ['./release.sh', 'check'], demo: [{ text: 'ok' }] }],
+        plans: [{ id: 'release', kind: 'run', title: 'Release', steps: ['check'] }],
+        actions: [{ id: 'release', home: true, plan: 'release', bindings: [{ key: '1' }], label: 'Release', detail: 'Check' }],
+      };
+`);
+      const snap = Bun.spawn(['bun', join(extract, 'package/bin/cli.js'), '--demo', '--snapshot'], {
+        cwd: project, stdout: 'pipe', stderr: 'pipe', env: { ...process.env, NO_COLOR: '1' },
+      });
+      const [frame, snapErr, snapCode] = await Promise.all([
+        new Response(snap.stdout).text(), new Response(snap.stderr).text(), snap.exited,
+      ]);
+      if (snapCode !== 0) throw new Error(snapErr || frame);
+      expect(frame).toContain('Foreign');
+      expect(frame).toContain('Check');
+      expect(frame).not.toContain('Apple Silicon');
+      expect(frame).not.toContain('Build app');
+    } finally {
+      await rm(packDir, { recursive: true, force: true });
+    }
   });
 });
 

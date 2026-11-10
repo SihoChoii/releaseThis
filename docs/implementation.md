@@ -18,7 +18,7 @@ Section order below is a design boundary, not the build order. The build order i
 | [HoldThis profile](#6-holdthis-profile) | `docs/impl/holdthis-profile.md` | 3 | Done |
 | [Profiles](#7-profiles) | [docs/impl/profiles.md](impl/profiles.md) | 4 | Done |
 | [Workspace refresh](#8-workspace-refresh) | [docs/impl/workspace-refresh.md](impl/workspace-refresh.md) | 5 | Done |
-| [Host genericity](#9-host-genericity) | [docs/impl/host-genericity.md](impl/host-genericity.md) | 6–7 | Phase 6 done |
+| [Host genericity](#9-host-genericity) | [docs/impl/host-genericity.md](impl/host-genericity.md) | 6–7 | Done |
 
 Phases match the roadmap in the architecture document. A phase is done only when every section that lists it meets that phase's exit.
 
@@ -245,7 +245,7 @@ Refreshing the workspace observes facts through probes without freezing the cock
 
 **Technical document:** [docs/impl/host-genericity.md](impl/host-genericity.md)
 
-Proof that the host is a product other repos can depend on, followed by moving HoldThis out. Phase 6 has landed. The fixture is [`examples/library`](../examples/library/releasethis.config.js). Phase 7 has not.
+Proof that the host is a product other repos can depend on, followed by moving HoldThis out. Phase 6 has landed. The fixture is [`examples/library`](../examples/library/releasethis.config.js). Phase 7 has landed. The reference profile is [`examples/holdthis`](../examples/holdthis/releasethis.config.js). A working directory with no `releasethis.config.js` opens an empty cockpit.
 
 **Outcome.** A non-HoldThis workflow runs with no renderer change and no branch on profile id. After extraction, this package is the host, and HoldThis ships only its profile.
 
@@ -277,7 +277,7 @@ Build in this order. Later technical documents follow it. Sections that share a 
 | 6 | A second workflow proves the host | 6 | Host genericity |
 | 7 | HoldThis leaves this package | 7 | Host genericity |
 
-Phase 3 is one cut. The cockpit must not keep the old stage list and the new model at the same time. The HoldThis profile is registered in-process in that cut. The file loader in phase 4 is how every other repo registers. HoldThis stays in-process until phase 7, then registers the same way.
+Phase 3 is one cut. The cockpit must not keep the old stage list and the new model at the same time. The HoldThis profile is registered in-process in that cut. The file loader in phase 4 is how every other repo registers. HoldThis stayed in-process until phase 7, then registered the same way.
 
 Through phase 5, `bun run tui:demo` and the current cockpit tests remain the behavior lock, except where a phase explicitly changes output (status lines, missing-profile screen). Phase 3 keeps the facts a demo task applied across refresh. Phase 5 runs that refresh through probes, and demo probes return the scripted facts, so this lock still holds.
 

@@ -25,11 +25,11 @@ HoldThis's current pipeline is the first profile and the stress test for the hos
 
 ## Current state
 
-The cockpit renders a profile. `bin/cli.js` loads `releasethis.config.js` from the working directory. HoldThis stays the in-process profile for this package when that file is absent.
+The cockpit renders a profile. `bin/cli.js` loads `releasethis.config.js` from the working directory. A missing file opens an empty cockpit. `bun run tui:demo` runs the reference profile in `examples/holdthis`.
 
 | Path | Role today |
 |---|---|
-| `bin/cli.js` | Entrypoint. Loads the cwd profile, then demo, snapshot, motion, and wiring. HoldThis is the fallback only when this package is the cwd and the config file is absent. |
+| `bin/cli.js` | Entrypoint. Loads the cwd profile, then demo, snapshot, motion, and wiring. A missing config opens an empty cockpit. |
 | `src/tui/runtime.js` | Raw input, resize, differential paint, snapshot mode. The draw loop asks `frame.js` when to paint. |
 | `src/tui/frame.js` | 90ms frame clock. Coalesces log, status, chrome, and animation into one paint per frame. |
 | `src/tui/terminal.js` | Palette, fit/wrap, boxes, spinner, progress bar. |
@@ -38,13 +38,13 @@ The cockpit renders a profile. `bin/cli.js` loads `releasethis.config.js` from t
 | `src/tui/runner.js` | Plan runner. Spawns a task command when the job has one, otherwise the profile script with the task's argv. Cancel is SIGTERM to the process group, then SIGKILL after three seconds. Demo playback reads lines declared on the task. Child `::status` lines fill the status slot and stay out of the transcript. The recorded plan instance sits beside `jobs`. |
 | `src/workflow/model.js` | Facts, task resolution, semver and integer fields, plan resolve, and command-binding checks. |
 | `src/workflow/load.js` | Loads `releasethis.config.js` into the profile object. A missing or invalid file becomes an empty cockpit. |
-| `src/profiles/holdthis.js` | HoldThis catalog, probes, version parameters, signed-only mode, publish plan, demo lines, and product copy. |
+| `examples/holdthis/profile.js` | Reference HoldThis profile: tasks, probes, version parameters, signed-only mode, publish plan, demo lines, and product copy. The HoldThis repo has its own copy. |
 | `src/release/app.js` | Session: navigation, plan start, publish's validate-then-upload gate, mode toggle, resume, and demo fact application. It does not name HoldThis paths or stage ids. |
 | `src/release/view.js` | Header, tabs, pipeline, artifacts, logs, progress. Rows, readiness, and the header come from the profile's descriptors. The running row and footer read the status slot. |
 | `src/release/dialogs.js` | Palette, schema-driven form, help generated from the command list, and confirmations. |
 | `src/release/repo.js` | GitHub `owner/repo` from `origin` or `RELEASETHIS_REPO`. |
 
-The HoldThis catalog, in [`src/profiles/holdthis.js`](../src/profiles/holdthis.js), is:
+The HoldThis catalog, in [`examples/holdthis/profile.js`](../examples/holdthis/profile.js), is:
 
 | Id | Label | Work |
 |---|---|---|
@@ -65,7 +65,7 @@ Paint behavior worth keeping:
 - Log wrapping is append-only. A paused viewport keeps its anchor when new lines arrive.
 - `--no-motion`, `RELEASETHIS_REDUCED_MOTION=1`, `M`, and `NO_COLOR` already exist.
 
-Phase 1 has landed. The sampler is `src/tui/frame.js`. An identical status patch does not mark the frame dirty. Phase 2 has landed in `src/tui/runner.js` and `src/release/view.js`: child `::status` lines fill the slot, and the running row and footer read it. Phase 3 has landed: facts, tasks, and plans are the product model, and HoldThis is the in-process profile. Phase 4 has landed in `src/workflow/load.js`: the cwd profile is `releasethis.config.js`. A missing or invalid file opens an empty cockpit. This package still opens HoldThis when that file is absent. Phase 5 has landed in `src/workflow/refresh.js`: refresh runs probes off the key path, isolates a failed probe, and streams checksums. Phase 6 has landed in `examples/library`: a library profile with its own task ids and publish plan runs through the same cockpit, and the host does not branch on profile id.
+Phase 1 has landed. The sampler is `src/tui/frame.js`. An identical status patch does not mark the frame dirty. Phase 2 has landed in `src/tui/runner.js` and `src/release/view.js`: child `::status` lines fill the slot, and the running row and footer read it. Phase 3 has landed: facts, tasks, and plans are the product model, and HoldThis is the in-process profile. Phase 4 has landed in `src/workflow/load.js`: the cwd profile is `releasethis.config.js`. A missing or invalid file opens an empty cockpit. Through phase 6 this package opened HoldThis when that file was absent. Phase 5 has landed in `src/workflow/refresh.js`: refresh runs probes off the key path, isolates a failed probe, and streams checksums. Phase 6 has landed in `examples/library`: a library profile with its own task ids and publish plan runs through the same cockpit, and the host does not branch on profile id. Phase 7 has landed: HoldThis registers from `examples/holdthis` and from the HoldThis repo. This package opens an empty cockpit when `releasethis.config.js` is absent, and the published package does not include the profile.
 
 ## Target
 
@@ -244,7 +244,7 @@ Each phase leaves `bun run tui:demo` and the current tests behaving as they do n
 - [x] **4. Load a profile from the repo being released.** Read the profile from the current working directory. Support command tasks, file artifacts, modes, plans, and confirm gates. A missing profile explains how to add one. Exit when a fixture repo with three declarative steps runs under demo and against a temp script, and the HoldThis demo still passes. Landed in `src/workflow/load.js`, `bin/cli.js`, `src/tui/runner.js`, and `src/release/`.
 - [x] **5. Refresh without freezing.** Run independent probes concurrently, isolate a probe failure to its own facts, and stream checksums. Show probe progress through the status slot. Exit when a slow probe does not block `Q` or tab changes, and one failed probe leaves the other facts on screen. Landed in `src/workflow/refresh.js`, `src/workflow/load.js`, `src/profiles/holdthis.js`, and `src/release/`.
 - [x] **6. Prove the host is generic.** Add a second fixture profile with different task ids, no Apple steps, and its own publish plan. Exit when adding that fixture does not require a renderer change, and the host has no branch on profile id. Landed in `examples/library` and `test/profile.test.js`.
-- [ ] **7. Move HoldThis out, when that repo is migrated.** The profile lives in the HoldThis repo. This package is the host. Keep a reference profile under something like `examples/holdthis` so the cockpit can still be developed here. Exit when a foreign repo can depend on `releasethis` and ship only its profile.
+- [x] **7. Move HoldThis out, when that repo is migrated.** The profile lives in the HoldThis repo. This package is the host. Keep a reference profile under something like `examples/holdthis` so the cockpit can still be developed here. Exit when a foreign repo can depend on `releasethis` and ship only its profile. Landed in `examples/holdthis`, `src/workflow/load.js`, and `bin/cli.js`.
 
 Phase 1 comes before any plugin is allowed to report often. Phase 3 comes before the config format is promised, so HoldThis is the schema's stress test. The declarative path is what foreign repos should use.
 
@@ -257,11 +257,11 @@ Phase 1 comes before any plugin is allowed to report often. Phase 3 comes before
 | `src/tui/runner.js` | Host plan runner and status parser. The latest-value slot landed in phase 1. The HoldThis demo table left in phase 3; tasks declare their own lines. A job with a command argv is spawned directly as of phase 4. |
 | `src/tui/frame.js` | Frame sampler from phase 1. One paint per 90ms tick for log, status, and animation. |
 | `src/release/view.js`, `app.js` | Host chrome and session. They read profile descriptors. A profile may omit a mode and a publish plan. |
-| `src/profiles/holdthis.js` | HoldThis profile: tasks, probes, plans, modes. In-process through phase 6. |
+| `examples/holdthis/profile.js` | Reference HoldThis profile. The HoldThis repo owns the copy it runs. |
 | `src/workflow/load.js` | Profile loader. Reads `releasethis.config.js` from the cwd. |
 | `src/workflow/refresh.js` | Probe refresh. Disjoint probes run together, a failed probe keeps its previous facts, and checksum archives stream. |
 | `src/release/repo.js` | Stay host. |
-| `bin/cli.js` | Loads `releasethis.config.js`. Registers HoldThis in-process when this package is the cwd and that file is absent. |
+| `bin/cli.js` | Loads `releasethis.config.js`. A missing file opens an empty cockpit. |
 
 ## Decisions
 
@@ -271,7 +271,7 @@ Settled in the planning conversation on 2026-11-08.
 |---|---|
 | The host is the cockpit and the plugin interface. Product behavior is plugins. | Skeleton UI stays coherent because plugins return descriptors. |
 | The product model is facts, tasks, and plans. | Shared memory is the fact store. |
-| A profile is the unit of adaptation. Task plugins are capabilities a profile composes. | Foreign directories do not fall back to HoldThis. This package keeps the in-process profile through phase 6 when `releasethis.config.js` is absent. |
+| A profile is the unit of adaptation. Task plugins are capabilities a profile composes. | A directory with no config opens an empty cockpit. The in-process HoldThis fallback ended in phase 7. |
 | Zip and package are separate tasks. | Package is today's DMG step. A sidebar group is optional. |
 | Publish is its own plan with a confirm gate. | Packaging must not upload by itself. |
 | Signed-only is a mode, not a branch in the view. | |
@@ -287,7 +287,7 @@ Settled in the planning conversation on 2026-11-08.
 | Probes that declare disjoint fact keys run concurrently. | Phase 5 default. |
 | Status sentinels are `::status key=value` lines. | Double quotes hold spaces. `\"` and `\\` are the escapes. A malformed line is logged and does not fail the task. Sentinels stay out of the transcript. |
 | A running status slot is quiet after 15 seconds. | The footer keeps the phase and says work is still going, with the age of the last update. |
-| The in-repo HoldThis profile lives at `src/profiles/holdthis.js` through phase 6. | `bin/cli.js` registers it. The cockpit does not import it. |
+| The reference HoldThis profile lives at `examples/holdthis`. | The HoldThis repo has its own copy and runs this package's CLI. The cockpit does not import the profile. |
 | Phase 3 keeps today's task ids, with argv stored separately. | Ids stay `notarize-app`, `dmg`, and `checksums`. A later rename does not have to change `script/release.sh` arguments. |
 | HoldThis renders six flat pipeline rows. | The host prints a group heading only when a task sets `group`. This profile does not. |
 | Structural keys and host chrome win a binding collision. | A profile key that repeats a reserved key, or another profile key, is rejected when the session is constructed. |
