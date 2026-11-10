@@ -288,7 +288,7 @@ describe('plan gates', () => {
     assertBlocked();
     expect(await Bun.file(invocations).exists()).toBe(false);
 
-    a.modal.build = '2';
+    a.modal.params.build = '2';
     a.reviewRelease();
     expect(a.modal.type).toBe('confirm');
     a.profile.plans.form.blocked = () => 'Release disabled';
@@ -344,12 +344,12 @@ describe('profile form validation', () => {
     expect(() => resolvePlan(plan, a.context({ version: '1.2.3', build: '9' }))).toThrow('Build must be at least 10.');
     expect(resolvePlan(plan, a.context({ version: '1.2.3', build: '10' }))[0].command).toEqual(['./release.sh', '1.2.3', '10']);
     a.openForm(plan);
-    a.modal.build = '0';
+    a.modal.params.build = '0';
     a.reviewRelease();
     expect(a.modal.type).toBe('release');
-    expect(a.modal.build).toBe('0');
+    expect(a.modal.params.build).toBe('0');
     expect(a.modal.error).toContain('positive integer');
-    a.modal.build = '9';
+    a.modal.params.build = '9';
     a.reviewRelease();
     expect(a.modal.error).toBe('Build must be at least 10.');
   });
@@ -392,6 +392,80 @@ describe('profile form validation', () => {
     a.reviewRelease();
     await accept(a);
     expect(a.runner.jobs.map(job => job.id)).toEqual(['finish']);
+    expect(a.runner.result).toBe('done');
+  });
+
+  test('form values stay in params when field names collide with modal controls', async () => {
+    const names = ['type', 'planId', 'field', 'cursor', 'error', 'preset', 'scroll'];
+    const fields = names.map(name => ({ name, type: 'integer', label: name }));
+    const preset = values => ({ name: values, values: Object.fromEntries(names.map(name => [name, values])) });
+    const a = await loadedApp({
+      tasks: [{ id: 'run', label: 'Run', argv: ['echo', 'safe'] }, { id: 'other', label: 'Other', argv: ['echo', 'other'] }],
+      plans: [
+        { id: 'form', kind: 'form', title: 'First review', fields, presets: [preset('1'), preset('2')], steps: ['run'] },
+        {
+          id: 'second', kind: 'form', title: 'Second review',
+          fields: [{ name: 'planId', type: 'integer', label: 'Plan' }, { name: 'build', type: 'integer', label: 'Build' }],
+          presets: [{ values: { planId: '1', build: '4' } }],
+          steps: ['other'],
+        },
+      ],
+      actions: [
+        { id: 'release', home: true, plan: 'form', bindings: [{ key: '1' }], label: 'Release', palette: 'Release', detail: 'First form' },
+        { id: 'second', home: true, plan: 'second', bindings: [{ key: '2' }], label: 'Second', palette: 'Second form', detail: 'Second form' },
+      ],
+    });
+    const values = input => Object.fromEntries(names.map(name => [name, input]));
+
+    a.openForm(a.profile.plans.form);
+    expect(a.modal).toMatchObject({
+      type: 'release', planId: 'form', field: 0, cursor: 1, error: '', preset: 0, params: values('1'),
+    });
+    const frame = screen(a);
+    expect(frame).toContain('F2 preset:');
+    expect(frame).toContain('type');
+    expect(frame).toContain('planId');
+    expect(a.modal.scroll).toBe(0);
+    expect(a.modal.params.scroll).toBe('1');
+    expect(a.modal.type).toBe('release');
+
+    a.key('', key('f2'));
+    expect(a.modal).toMatchObject({ type: 'release', planId: 'form', field: 0, preset: 1, params: values('2') });
+    expect(screen(a)).toContain('2');
+    a.key('', key('f2'));
+    expect(a.modal.params).toEqual(values('1'));
+    expect(a.modal.preset).toBe(0);
+
+    a.reviewRelease();
+    expect(a.modal.type).toBe('confirm');
+    expect(a.modal.title).toBe('First review');
+    expect(a.modal.lines.join('\n')).toContain('type  1');
+    expect(a.modal.lines.join('\n')).toContain('planId  1');
+    a.key('', key('escape'));
+    expect(a.modal.type).toBe('release');
+    expect(a.modal.planId).toBe('form');
+
+    a.key('', key('backspace'));
+    expect(a.modal.type).toBe('release');
+    expect(a.modal.params.type).toBe('');
+    expect(a.modal.field).toBe(0);
+    a.key('', key('escape'));
+
+    a.key('2', key('2'));
+    expect(a.modal).toMatchObject({ type: 'release', planId: 'second', params: { planId: '1', build: '4' } });
+    a.key('', key('escape'));
+    a.key('/', {});
+    a.key('Second form', {});
+    a.key('', key('return'));
+    expect(a.modal).toMatchObject({ type: 'release', planId: 'second', field: 0, params: { planId: '1', build: '4' } });
+    expect(screen(a)).toContain('Plan');
+    expect(screen(a)).toContain('Build');
+    a.reviewRelease();
+    expect(a.modal.title).toBe('Second review');
+    await accept(a);
+    expect(a.runner.session.planId).toBe('second');
+    expect(a.runner.session.params).toEqual({ planId: '1', build: '4' });
+    expect(a.runner.jobs.map(job => job.id)).toEqual(['other']);
     expect(a.runner.result).toBe('done');
   });
 });

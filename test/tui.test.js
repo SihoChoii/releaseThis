@@ -242,17 +242,17 @@ describe('polished workspace flows', () => {
     const a = app(); a.newRelease();
     for (const expected of ['1.0.4', '1.1.0', '2.0.0']) {
       a.key('', key('f2'));
-      expect(a.modal.version).toBe(expected);
-      expect(a.modal.build).toBe('5');
+      expect(a.modal.params.version).toBe(expected);
+      expect(a.modal.params.build).toBe('5');
     }
     a.key('', key('f2'));
-    expect(a.modal.version).toBe('1.0.3');
-    expect(a.modal.build).toBe('4');
+    expect(a.modal.params.version).toBe('1.0.3');
+    expect(a.modal.params.build).toBe('4');
   });
   test('Escape from release review returns to the edited draft', () => {
     const a = app(); a.newRelease(); a.applyPreset(); a.reviewRelease();
     a.key('', key('escape'));
-    expect(a.modal.type).toBe('release'); expect(a.modal.version).toBe('1.0.4');
+    expect(a.modal.type).toBe('release'); expect(a.modal.params.version).toBe('1.0.4');
   });
   test('long confirmation bodies scroll while keeping controls visible', () => {
     const a = app();
@@ -923,7 +923,7 @@ describe('parameter schema form', () => {
     expect(a.modal.field).toBe(2);
     a.key('', { name: 'u', ctrl: true });
     a.key('7', {});
-    expect(a.modal.attempts).toBe('7');
+    expect(a.modal.params.attempts).toBe('7');
     a.key('', key('tab'));
     expect(a.modal.field).toBe(3);
     a.key('', key('tab'));
@@ -944,18 +944,18 @@ describe('parameter schema form', () => {
       ],
     );
     a.newRelease();
-    expect(a.modal.channel).toBe('1');
-    expect(a.modal.serial).toBe('2');
+    expect(a.modal.params.channel).toBe('1');
+    expect(a.modal.params.serial).toBe('2');
     a.key('', key('f2'));
-    expect(a.modal.channel).toBe('8');
-    expect(a.modal.serial).toBe('9');
+    expect(a.modal.params.channel).toBe('8');
+    expect(a.modal.params.serial).toBe('9');
     expect(a.modal.version).toBeUndefined();
     a.key('', { name: 'u', ctrl: true });
     a.key('3', {});
-    expect(a.modal.channel).toBe('3');
+    expect(a.modal.params.channel).toBe('3');
     a.key('', key('tab'));
     a.key('4', {});
-    expect(a.modal.serial).toBe('94');
+    expect(a.modal.params.serial).toBe('94');
   });
 });
 

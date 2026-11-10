@@ -31,7 +31,7 @@ export function dialog(app, width, maxHeight, c) {
       return selected ? c.selected(fit(row, width - 3), width - 2) : c(row);
     };
     body = [' ' + c(`F2 preset: ${plan.presets[m.preset]?.name || 'Custom'}`, 'ice'), '',
-      ...plan.fields.map((descriptor, index) => field(descriptor.label, String(m[descriptor.name] ?? ''), index)), '',
+      ...plan.fields.map((descriptor, index) => field(descriptor.label, String(m.params?.[descriptor.name] ?? ''), index)), '',
       ...wrap(plan.hint(app.context()), width - 4).map(l => ' ' + c(l, app.signedOnly ? 'amber' : 'muted')),
       ...wrap(m.error || plan.help, width - 4).map(l => ' ' + c(l, m.error ? 'red' : 'muted'))];
     footer = [m.field === plan.fields.length ? c.selected(` ❯ ${plan.submit}`, width - 2) : c(`   ${plan.submit}`, 'ink', true),
