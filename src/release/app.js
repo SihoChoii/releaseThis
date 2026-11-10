@@ -53,7 +53,8 @@ export class App {
   }
   formParams(plan, modal = this.modal) {
     const params = {};
-    for (const field of plan?.fields || []) params[field.name] = String(modal?.[field.name] ?? '').trim();
+    const source = modal?.params || {};
+    for (const field of plan?.fields || []) params[field.name] = String(source[field.name] ?? '').trim();
     return params;
   }
   gatedPlan() { return Object.values(this.profile.plans).find(plan => plan.kind === 'gated'); }
@@ -148,9 +149,11 @@ export class App {
     if (!this.facts) return this.notify('Workspace is not ready. Press R to retry.');
     if (this.canContinue(plan)) return this.continuePlan();
     try {
-      const defaults = openingParams(plan, this.facts);
+      const defaults = openingParams(plan, this.facts) || {};
+      const params = {};
+      for (const field of plan.fields) params[field.name] = String(defaults[field.name] ?? '');
       const first = plan.fields[0];
-      const draft = { type: 'release', planId: plan.id, ...defaults, field: 0, cursor: String(defaults[first.name] ?? '').length, error: '', preset: 0 };
+      const draft = { type: 'release', planId: plan.id, params, field: 0, cursor: String(params[first.name] ?? '').length, error: '', preset: 0 };
       draft.error = planBlock(plan, this.context(this.formParams(plan, draft)));
       this.modal = draft;
     } catch (error) { this.notify(error.message); }
@@ -158,7 +161,7 @@ export class App {
 
   reviewRelease() {
     if (!this.canStartAction()) return;
-    const draft = { ...this.modal };
+    const draft = { ...this.modal, params: { ...(this.modal?.params || {}) } };
     const plan = this.activeFormPlan(draft);
     const params = this.formParams(plan, draft);
     const ctx = this.context(params);
@@ -297,9 +300,10 @@ export class App {
     try {
       modal.preset = ((modal.preset ?? 0) + 1) % plan.presets.length;
       const next = plan.presets[modal.preset].apply(this.facts) || {};
-      for (const field of plan.fields) if (Object.hasOwn(next, field.name)) modal[field.name] = next[field.name];
+      modal.params ??= {};
+      for (const field of plan.fields) if (Object.hasOwn(next, field.name)) modal.params[field.name] = String(next[field.name] ?? '');
       const field = plan.fields[modal.field] || plan.fields[0];
-      modal.cursor = String(modal[field.name] ?? '').length;
+      modal.cursor = String(modal.params[field.name] ?? '').length;
       modal.error = planBlock(plan, this.context(this.formParams(plan, modal)));
     } catch (error) { modal.error = error.message; }
   }
@@ -513,7 +517,7 @@ export class App {
       const moveField = next => {
         m.field = (next % count + count) % count;
         const descriptor = fields[m.field];
-        if (descriptor) m.cursor = String(m[descriptor.name] ?? '').length;
+        if (descriptor) m.cursor = String(m.params?.[descriptor.name] ?? '').length;
       };
       if (key.name === 'tab') return moveField(m.field + (key.shift ? -1 : 1));
       if (key.name === 'return') return m.field === fields.length ? this.reviewRelease() : moveField(m.field + 1);
@@ -522,16 +526,17 @@ export class App {
       const descriptor = fields[m.field];
       if (!descriptor) return;
       const name = descriptor.name;
-      const value = () => String(m[name] ?? '');
+      m.params ??= {};
+      const value = () => String(m.params[name] ?? '');
       m.error = '';
-      if (key.ctrl && key.name === 'u') { m[name] = ''; m.cursor = 0; m.preset = -1; }
+      if (key.ctrl && key.name === 'u') { m.params[name] = ''; m.cursor = 0; m.preset = -1; }
       else if (key.name === 'left') m.cursor = Math.max(0, m.cursor - 1);
       else if (key.name === 'right') m.cursor = Math.min(value().length, m.cursor + 1);
       else if (key.name === 'home') m.cursor = 0;
       else if (key.name === 'end') m.cursor = value().length;
-      else if (key.name === 'backspace' && m.cursor > 0) { m[name] = value().slice(0, m.cursor - 1) + value().slice(m.cursor); m.cursor--; m.preset = -1; }
-      else if (key.name === 'delete') { m[name] = value().slice(0, m.cursor) + value().slice(m.cursor + 1); m.preset = -1; }
-      else if (!key.ctrl && !key.meta && text && /^[\d.]+$/.test(text) && value().length + text.length <= 40) { m[name] = value().slice(0, m.cursor) + text + value().slice(m.cursor); m.cursor += text.length; m.preset = -1; }
+      else if (key.name === 'backspace' && m.cursor > 0) { m.params[name] = value().slice(0, m.cursor - 1) + value().slice(m.cursor); m.cursor--; m.preset = -1; }
+      else if (key.name === 'delete') { m.params[name] = value().slice(0, m.cursor) + value().slice(m.cursor + 1); m.preset = -1; }
+      else if (!key.ctrl && !key.meta && text && /^[\d.]+$/.test(text) && value().length + text.length <= 40) { m.params[name] = value().slice(0, m.cursor) + text + value().slice(m.cursor); m.cursor += text.length; m.preset = -1; }
     }
   }
 

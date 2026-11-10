@@ -387,7 +387,7 @@ console.log(process.argv[3].endsWith('CFBundleVersion') ? value.build : value.ve
     await app.refresh();
     expect(app.notice).toBe('');
     app.key('1', { name: '1' });
-    expect(app.modal).toMatchObject({ type: 'release', version: '1.2.3', build: '4' });
+    expect(app.modal).toMatchObject({ type: 'release', params: { version: '1.2.3', build: '4' } });
     app.key('', { name: 'escape' });
     palette(app, 'New release');
     expect(app.modal.type).toBe('release');
