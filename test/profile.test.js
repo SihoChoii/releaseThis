@@ -233,6 +233,80 @@ describe('plan gates', () => {
     expect(a.runner.result).toBe('done');
     expect(await readFile(join(temp, 'invocations.txt'), 'utf8')).toBe('check\nupload\nupload\n');
   });
+
+  test('a blocked form never starts and becomes usable when the blocker clears', async () => {
+    await writeScript('release.sh');
+    const a = await loadedApp(`export default {
+      tasks: [{ id: 'run', label: 'Run', argv: ['./release.sh', 'run'] }],
+      plans: [{
+        id: 'form', kind: 'form',
+        fields: [{ name: 'build', type: 'integer' }],
+        presets: [{ values: { build: '1' } }],
+        steps: ['run'],
+        blocked: ctx => ctx.params.build === '1' ? 'Release disabled' : '',
+      }],
+      actions: [{ id: 'release', home: true, plan: 'form', bindings: [{ key: '1' }], label: 'Release', palette: 'Release', detail: 'Release the build' }],
+    };`, { demo: false });
+    const plan = a.profile.plans.form;
+    const invocations = join(temp, 'invocations.txt');
+    const assertBlocked = () => {
+      expect(a.modal?.type).toBe('release');
+      expect(a.modal.error).toBe('Release disabled');
+      expect(a.notice).toBe('Release disabled');
+      expect(a.runner.jobs).toEqual([]);
+      expect(a.runner.running).toBe(false);
+      expect(a.runner.result).toBeNull();
+    };
+
+    a.openForm(plan);
+    expect(a.modal.type).toBe('release');
+    expect(a.modal.planId).toBe('form');
+    expect(screen(a)).toContain('Release disabled');
+    expect(plan.blocked(a.context({ build: '1' }))).toBe('Release disabled');
+    a.reviewRelease();
+    assertBlocked();
+
+    a.key('', key('escape'));
+    a.key('1', key('1'));
+    expect(a.modal.type).toBe('release');
+    a.key('', key('return'));
+    a.key('', key('return'));
+    assertBlocked();
+
+    a.key('', key('escape'));
+    a.selection = 0;
+    a.key('', key('return'));
+    a.reviewRelease();
+    assertBlocked();
+
+    a.key('', key('escape'));
+    a.key('/', {});
+    a.key('Release', {});
+    a.key('', key('return'));
+    expect(a.modal?.type).toBe('release');
+    a.reviewRelease();
+    assertBlocked();
+    expect(await Bun.file(invocations).exists()).toBe(false);
+
+    a.modal.build = '2';
+    a.reviewRelease();
+    expect(a.modal.type).toBe('confirm');
+    a.profile.plans.form.blocked = () => 'Release disabled';
+    await accept(a);
+    expect(a.modal.type).toBe('release');
+    expect(a.modal.error).toBe('Release disabled');
+    expect(a.runner.jobs).toEqual([]);
+    expect(await Bun.file(invocations).exists()).toBe(false);
+
+    a.profile.plans.form.blocked = ctx => ctx.params.build === '1' ? 'Release disabled' : '';
+    a.reviewRelease();
+    expect(a.modal.type).toBe('confirm');
+    await accept(a);
+    expect(a.runner.result).toBe('done');
+    expect(a.runner.jobs.map(job => job.status)).toEqual(['done']);
+    expect(a.runner.session.params).toEqual({ build: '2' });
+    expect(await readFile(invocations, 'utf8')).toBe('run\n');
+  });
 });
 
 describe('profile form validation', () => {
