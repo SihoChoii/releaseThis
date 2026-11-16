@@ -1,4 +1,3 @@
-// Samples log, status, chrome, and animation onto one paint per 90ms frame.
 // input() paints immediately and leaves log and status dirtiness for the next tick.
 export function createFrameClock({ paint, isRunning, motion }) {
   let logDirty = false, statusDirty = false, chromeDirty = false, lastFrame = null, lastSecond = null;

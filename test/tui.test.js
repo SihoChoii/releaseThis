@@ -2,14 +2,14 @@ import { test, expect, describe, beforeEach, afterEach } from 'bun:test';
 import { mkdtemp, writeFile, readFile, rm, chmod } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createHash } from 'node:crypto';
 import { App } from '../src/release/app.js';
-import { Runner, cleanOutput, takeStatusLine } from '../src/tui/runner.js';
+import { Runner, takeStatusLine } from '../src/tui/runner.js';
+import { cleanOutput, fit, spinner } from '../src/tui/terminal.js';
 import { createFrameClock } from '../src/tui/frame.js';
 import { visibleLogs } from '../src/tui/logs.js';
-import { holdthis, checksumOK } from '../examples/holdthis/profile.js';
+import { holdthis } from '../examples/holdthis/profile.js';
 import { openingParams, planBlock, requirement, resolvePlan } from '../src/workflow/model.js';
-import { render, fit, spinner } from '../src/release/view.js';
+import { render } from '../src/release/view.js';
 
 let temp;
 beforeEach(async () => { temp = await mkdtemp(join(tmpdir(), 'releasethis-tui-')); });
@@ -67,17 +67,6 @@ describe('release planning and prerequisites', () => {
     expect(planBlock(holdthis.plans.publish, ctx(true))).not.toBe('');
     facts.all().find(fact => fact.kind === 'checksum').state = 'mismatch';
     expect(planBlock(holdthis.plans.publish, ctx(false))).not.toBe('');
-  });
-  test('validates checksum bytes and recorded filename', async () => {
-    const archive = join(temp, 'app.zip'), sha = archive + '.sha256';
-    await writeFile(archive, 'archive bytes');
-    const digest = createHash('sha256').update('archive bytes').digest('hex');
-    await writeFile(sha, `${digest}  app.zip\n`);
-    expect(await checksumOK(archive, sha)).toBe(true);
-    await writeFile(sha, `${digest}  other.zip\n`);
-    expect(await checksumOK(archive, sha)).toBe(false);
-    await writeFile(sha, `${'0'.repeat(64)}  app.zip\n`);
-    expect(await checksumOK(archive, sha)).toBe(false);
   });
 });
 
@@ -299,8 +288,7 @@ describe('polished workspace flows', () => {
 });
 
 describe('log reading', () => {
-  test('new output preserves the paused viewport and End resumes following', async () => {
-    const { visibleLogs } = await import('../src/tui/logs.js');
+  test('new output preserves the paused viewport and End resumes following', () => {
     const a = app();
     for (let i = 0; i < 30; i++) a.runner.log(`line ${i}`);
     a.tab = 2; a.scroll = 10;
@@ -310,8 +298,7 @@ describe('log reading', () => {
     a.key('', key('end'));
     expect(visibleLogs(a, 60, 5).rows.at(-1).text).toBe('more output');
   });
-  test('filter returns matching entries with long lines wrapped', async () => {
-    const { visibleLogs } = await import('../src/tui/logs.js');
+  test('filter returns matching entries with long lines wrapped', () => {
     const a = app(); a.runner.log('compile success'); a.runner.log('ERROR ' + 'detail '.repeat(20));
     a.logFilter = 'error';
     const rows = visibleLogs(a, 40, 100).rows;

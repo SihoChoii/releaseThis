@@ -132,7 +132,7 @@ export class App {
     if (!plan) return;
     if (!this.facts) return this.notify('Workspace is not ready. Press R to retry.');
     if (this.canContinue(plan)) return this.continuePlan();
-    const blocked = plan.blocked?.(this.context()) || '';
+    const blocked = planBlock(plan, this.context());
     if (blocked) return this.notify(blocked);
     try {
       const jobs = resolvePlan(plan, this.context());
@@ -579,10 +579,13 @@ export class App {
       if (stepIndex >= 0 && stepIndex < this.profile.catalog.length) { this.selection = stepIndex; this.selectStep(); }
       else if (text === 'r') this.refresh();
       else if (text === 't') this.retry();
-      else if (this.actionFor(text)) this.runAction(this.actionFor(text));
-      else if (key.name === 'return' && this.tab === 0) {
-        if (this.screen === 'steps') this.selectStep();
-        else this.runAction(this.homeActions()[this.selection]);
+      else {
+        const action = this.actionFor(text);
+        if (action) this.runAction(action);
+        else if (key.name === 'return' && this.tab === 0) {
+          if (this.screen === 'steps') this.selectStep();
+          else this.runAction(this.homeActions()[this.selection]);
+        }
       }
     }
     this.onChange();

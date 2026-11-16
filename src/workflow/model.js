@@ -1,6 +1,3 @@
-// Host product model. Profiles contribute facts, tasks, plans, modes, and actions.
-// The cockpit and runner never name a product.
-
 export const fieldTypes = {
   semver: value => /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(value),
   integer: value => /^[1-9]\d*$/.test(value),
@@ -36,7 +33,6 @@ export function project(facts) {
   };
 }
 
-// Rebuild a fact store from the workspace projection tests and the view share.
 export function factsFromWorkspace(profile, workspace) {
   const facts = profile.demoFacts();
   const source = facts.all().find(fact => fact.role === 'source-version');
@@ -102,7 +98,6 @@ export function planBlock(plan, ctx) {
   return plan.blocked?.(ctx) || '';
 }
 
-// Structural keys and host chrome win. A profile binding that collides is rejected.
 export function assertProfileBindings(profile) {
   const seen = new Set();
   for (const action of profile.actions || []) {

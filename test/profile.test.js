@@ -71,6 +71,22 @@ async function accept(a) {
   return callback();
 }
 
+async function snapshot(cwd) {
+  const proc = Bun.spawn(['bun', join(packageRoot, 'bin/cli.js'), '--demo', '--snapshot'], {
+    cwd,
+    stdout: 'pipe',
+    stderr: 'pipe',
+    env: { ...process.env, NO_COLOR: '1' },
+  });
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  if (code !== 0) throw new Error(stderr || stdout);
+  return stdout;
+}
+
 const commandTask = id => ({ id, label: id, argv: ['./release.sh', id], catalog: false });
 const gate = title => ({ title, lines: [title], accept: 'Continue', danger: true });
 const gatedPlan = id => ({
@@ -617,7 +633,6 @@ describe('missing and invalid profiles', () => {
     a.key('', key('down'));
     a.key('', key('return'));
     expect(a.selection).toBe(0);
-    expect(Number.isNaN(a.selection)).toBe(false);
     a.key('', key('tab'));
     expect(a.tab).toBe(1);
     expect(screen(a)).toContain('releasethis.config.js');
@@ -687,18 +702,7 @@ describe('missing and invalid profiles', () => {
   });
 
   test('a snapshot of this package shows the empty cockpit', async () => {
-    const proc = Bun.spawn(['bun', 'bin/cli.js', '--demo', '--snapshot'], {
-      cwd: packageRoot,
-      stdout: 'pipe',
-      stderr: 'pipe',
-      env: { ...process.env, NO_COLOR: '1' },
-    });
-    const [stdout, stderr, code] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
-    if (code !== 0) throw new Error(stderr || stdout);
+    const stdout = await snapshot(packageRoot);
     expect(stdout).toContain('releasethis.config.js');
     expect(stdout).toContain('no profile');
     expect(stdout).not.toContain('Apple Silicon');
@@ -771,18 +775,7 @@ describe('finished profiles', () => {
     a.key('q');
     expect(quit).toBe(true);
 
-    const proc = Bun.spawn(['bun', join(packageRoot, 'bin/cli.js'), '--demo', '--snapshot'], {
-      cwd: temp,
-      stdout: 'pipe',
-      stderr: 'pipe',
-      env: { ...process.env, NO_COLOR: '1' },
-    });
-    const [stdout, stderr, code] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
-    if (code !== 0) throw new Error(stderr || stdout);
+    const stdout = await snapshot(temp);
     expect(stdout).toContain('header must be an object.');
     expect(stdout).toContain('profile problem');
   });
@@ -811,18 +804,7 @@ describe('holdthis reference profile', () => {
   });
 
   test('a snapshot of the reference profile shows the HoldThis header', async () => {
-    const proc = Bun.spawn(['bun', join(packageRoot, 'bin/cli.js'), '--demo', '--snapshot'], {
-      cwd: join(packageRoot, 'examples/holdthis'),
-      stdout: 'pipe',
-      stderr: 'pipe',
-      env: { ...process.env, NO_COLOR: '1' },
-    });
-    const [stdout, stderr, code] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
-    if (code !== 0) throw new Error(stderr || stdout);
+    const stdout = await snapshot(join(packageRoot, 'examples/holdthis'));
     expect(stdout).toContain('Apple Silicon');
     expect(stdout).toContain('Build app');
   });
@@ -1015,18 +997,7 @@ describe('library workflow', () => {
   });
 
   test('a snapshot of the example directory shows the library header', async () => {
-    const proc = Bun.spawn(['bun', join(packageRoot, 'bin/cli.js'), '--demo', '--snapshot'], {
-      cwd: libraryExample,
-      stdout: 'pipe',
-      stderr: 'pipe',
-      env: { ...process.env, NO_COLOR: '1' },
-    });
-    const [stdout, stderr, code] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
-    if (code !== 0) throw new Error(stderr || stdout);
+    const stdout = await snapshot(libraryExample);
     expect(stdout).toContain('Library');
     expect(stdout).toContain('Test');
     expect(stdout).toContain('Pack');

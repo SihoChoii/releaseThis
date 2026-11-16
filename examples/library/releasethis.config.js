@@ -19,7 +19,7 @@ export default {
       id: 'publish', kind: 'gated', title: 'Publish', resume: 'revalidate',
       confirmStart: { title: 'Validate package', lines: ['Dry-run the package before upload.'], accept: 'Validate' },
       blocked(ctx) {
-        const ready = fact => fact && ['present', 'verified'].includes(fact.state);
+        const ready = fact => ['present', 'verified'].includes(fact.state);
         const needed = ctx.facts.all().filter(fact => fact.gatesPublish);
         if (!needed.length || needed.some(fact => !ready(fact))) return 'Pack the archive and verify its checksum first.';
         return '';

@@ -3,7 +3,6 @@ import { StringDecoder } from 'node:string_decoder';
 import { stripVTControlCharacters } from 'node:util';
 import { cleanOutput } from './terminal.js';
 
-export { cleanOutput };
 export const STALE_AFTER_MS = 15_000;
 
 const STATUS_KEYS = new Set(['phase', 'detail', 'progress', 'completed', 'total']);
@@ -40,7 +39,6 @@ function count(value) {
   return Number.isInteger(number) && number >= 0 ? number : null;
 }
 
-// null: not a sentinel. { malformed }: log the line. { patch }: replace the slot.
 export function takeStatusLine(line) {
   const trimmed = String(line).trim();
   if (!trimmed.startsWith('::status')) return null;
@@ -54,7 +52,7 @@ export function takeStatusLine(line) {
   if ('progress' in fields) {
     if (!/^(?:0|1|0?\.\d+|\d+\.\d+)$/.test(fields.progress)) return { malformed: true };
     const progress = Number(fields.progress);
-    if (!Number.isFinite(progress) || progress < 0 || progress > 1) return { malformed: true };
+    if (progress > 1) return { malformed: true };
     patch.progress = progress;
   }
   for (const key of ['completed', 'total']) {
@@ -126,7 +124,6 @@ export class Runner {
     this.onChange('log');
   }
 
-  // Latest visible snapshot. Omitted fields clear. Identical text refreshes the heartbeat and does not notify.
   status(patch) {
     const source = patch ?? {};
     const next = {
@@ -146,7 +143,6 @@ export class Runner {
     this.onChange('status');
   }
 
-  // Child stdout and stderr only. log() keeps a literal ::status line in the transcript.
   ingestChildLine(line) {
     const parsed = takeStatusLine(cleanOutput(line));
     if (parsed?.patch) this.status(parsed.patch);
