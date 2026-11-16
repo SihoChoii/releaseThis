@@ -36,7 +36,6 @@ export function project(facts) {
   };
 }
 
-// Rebuild a fact store from the workspace projection tests and the view share.
 export function factsFromWorkspace(profile, workspace) {
   const facts = profile.demoFacts();
   const source = facts.all().find(fact => fact.role === 'source-version');

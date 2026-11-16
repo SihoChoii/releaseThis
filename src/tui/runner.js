@@ -3,7 +3,6 @@ import { StringDecoder } from 'node:string_decoder';
 import { stripVTControlCharacters } from 'node:util';
 import { cleanOutput } from './terminal.js';
 
-export { cleanOutput };
 export const STALE_AFTER_MS = 15_000;
 
 const STATUS_KEYS = new Set(['phase', 'detail', 'progress', 'completed', 'total']);

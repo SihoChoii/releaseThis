@@ -4,7 +4,6 @@ import { painter, fit, box, wrap, plain, bar, spinner, splitLine } from '../tui/
 import { dialog } from './dialogs.js';
 import { logLines } from '../tui/logs.js';
 import { sameVersion } from '../workflow/model.js';
-export { fit, painter, palette, bar, spinner } from '../tui/terminal.js';
 
 const version = value => value ? `${value.version} (${value.build})` : 'Not built';
 const stamp = time => time ? new Date(time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';

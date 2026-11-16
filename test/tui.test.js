@@ -4,12 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { App } from '../src/release/app.js';
-import { Runner, cleanOutput, takeStatusLine } from '../src/tui/runner.js';
+import { Runner, takeStatusLine } from '../src/tui/runner.js';
+import { cleanOutput, fit, spinner } from '../src/tui/terminal.js';
 import { createFrameClock } from '../src/tui/frame.js';
 import { visibleLogs } from '../src/tui/logs.js';
 import { holdthis, checksumOK } from '../examples/holdthis/profile.js';
 import { openingParams, planBlock, requirement, resolvePlan } from '../src/workflow/model.js';
-import { render, fit, spinner } from '../src/release/view.js';
+import { render } from '../src/release/view.js';
 
 let temp;
 beforeEach(async () => { temp = await mkdtemp(join(tmpdir(), 'releasethis-tui-')); });

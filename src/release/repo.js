@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 
-/** Normalize a GitHub remote URL to `owner/repo`, or null if not GitHub. */
+// owner/repo for a GitHub remote, or null.
 export function parseGithubRepo(url) {
   if (!url || typeof url !== 'string') return null;
   const trimmed = url.trim().replace(/\.git$/i, '');
@@ -13,11 +13,7 @@ export function parseGithubRepo(url) {
   return null;
 }
 
-/**
- * Resolve the host project's GitHub repo.
- * Prefers RELEASETHIS_REPO, then falls back to `git remote get-url origin`.
- * @returns {{ repo: string | null, source: 'env' | 'origin' | null }}
- */
+// RELEASETHIS_REPO wins over git remote origin.
 export function detectGithubRepo(root, env = process.env) {
   const fromEnv = env.RELEASETHIS_REPO?.trim();
   if (fromEnv) {

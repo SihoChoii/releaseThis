@@ -742,7 +742,6 @@ export async function loadProfile(root) {
   }
 }
 
-// Every directory gets the loaded profile or the empty cockpit.
 export async function profileForDirectory(root) {
   const loaded = await loadProfile(root);
   return loaded.profile;
