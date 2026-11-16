@@ -1,10 +1,6 @@
 import { wrap } from './terminal.js';
 import { duration } from './format.js';
 
-// Append newly arrived lines to the wrap cache. A paused viewport keeps its anchor
-// when the buffer grows or the 2,500-line cap drops older rows. An input paint sets
-// deferLogIngest so a keypress does not wrap that backlog; the frame tick ingests it.
-// Wrapping is budgeted so a burst of long lines yields back to input between batches.
 const WRAP_BUDGET = 8000;
 const matches = (item, filter) => !filter || item.text.toLowerCase().includes(filter.toLowerCase());
 

@@ -39,7 +39,6 @@ function count(value) {
   return Number.isInteger(number) && number >= 0 ? number : null;
 }
 
-// null: not a sentinel. { malformed }: log the line. { patch }: replace the slot.
 export function takeStatusLine(line) {
   const trimmed = String(line).trim();
   if (!trimmed.startsWith('::status')) return null;
@@ -125,7 +124,6 @@ export class Runner {
     this.onChange('log');
   }
 
-  // Latest visible snapshot. Omitted fields clear. Identical text refreshes the heartbeat and does not notify.
   status(patch) {
     const source = patch ?? {};
     const next = {
@@ -145,7 +143,6 @@ export class Runner {
     this.onChange('status');
   }
 
-  // Child stdout and stderr only. log() keeps a literal ::status line in the transcript.
   ingestChildLine(line) {
     const parsed = takeStatusLine(cleanOutput(line));
     if (parsed?.patch) this.status(parsed.patch);

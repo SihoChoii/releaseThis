@@ -1,5 +1,3 @@
-// Load a repo profile from releasethis.config.js. The cockpit renders the compiled profile.
-
 import { stat } from 'node:fs/promises';
 import { isAbsolute, join, normalize, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';

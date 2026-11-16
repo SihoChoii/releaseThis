@@ -1,6 +1,5 @@
 import { spawnSync } from 'node:child_process';
 
-// owner/repo for a GitHub remote, or null.
 export function parseGithubRepo(url) {
   if (!url || typeof url !== 'string') return null;
   const trimmed = url.trim().replace(/\.git$/i, '');
@@ -13,7 +12,6 @@ export function parseGithubRepo(url) {
   return null;
 }
 
-// RELEASETHIS_REPO wins over git remote origin.
 export function detectGithubRepo(root, env = process.env) {
   const fromEnv = env.RELEASETHIS_REPO?.trim();
   if (fromEnv) {

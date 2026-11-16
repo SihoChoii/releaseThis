@@ -1,6 +1,3 @@
-// Workspace refresh. Probes in one wave share no fact keys and run together.
-// A failed probe keeps the previous values of its keys. Checksum archives stream.
-
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
@@ -144,8 +141,6 @@ export function fileProbe(desc, createFact) {
   };
 }
 
-// Boolean match. A missing archive, a bad sidecar, or a mismatched digest is false.
-// Abort rejects; other IO failures do not.
 function checksumRecord(text) {
   const line = String(text).trim().split(/\r?\n/, 1)[0] ?? '';
   const match = /^([a-fA-F\d]{64})\s+(.*)$/.exec(line);
@@ -153,6 +148,7 @@ function checksumRecord(text) {
   return { digest: match[1], name: match[2] };
 }
 
+// Abort rejects. Missing archive, bad sidecar, mismatch, or other IO failures return false.
 export async function verifyChecksum(archive, checksum, { status, signal, highWaterMark } = {}) {
   let stream;
   const onAbort = () => stream?.destroy(abortError());
