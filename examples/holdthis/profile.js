@@ -3,7 +3,7 @@ import { stat } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { factStore, fieldTypes, materialize, project, sameVersion } from '../../src/workflow/model.js';
-import { checksumProbe, fileProbe, refreshFacts, verifyChecksum } from '../../src/workflow/refresh.js';
+import { checksumProbe, fileProbe } from '../../src/workflow/refresh.js';
 
 const exec = promisify(execFile);
 const explain = {
@@ -268,11 +268,6 @@ async function plistVersion(path, env, signal) {
   return { version: values[0], build: values[1] };
 }
 
-export async function checksumOK(archive, checksum) {
-  try { return await verifyChecksum(archive, checksum); }
-  catch { return false; }
-}
-
 const byArtifact = Object.fromEntries(artifacts.map(desc => [desc.key, desc]));
 
 const probes = [
@@ -324,11 +319,6 @@ const probes = [
     ? checksumProbe(desc, byArtifact[desc.archive], artifactFact)
     : fileProbe(desc, artifactFact)),
 ];
-
-export async function inspect(root, env = process.env) {
-  const { facts } = await refreshFacts({ profile: { probes, demoFacts }, root, demo: false, env });
-  return facts;
-}
 
 export function commandLine(args) {
   return `./script/release.sh ${args.join(' ')}`;
@@ -463,9 +453,8 @@ export const holdthis = {
   demoFacts,
   demoWorkspace,
   probes,
-  inspect,
   demoTag(facts) {
-    const built = facts?.get('version.built')?.value;
+    const built = facts.get('version.built')?.value;
     return built ? `v${built.version}+${built.build}` : null;
   },
   header: { subtitle: 'Apple Silicon' },

@@ -19,16 +19,12 @@ export function detectGithubRepo(root, env = process.env) {
     return { repo: parsed || fromEnv.replace(/\.git$/i, ''), source: 'env' };
   }
 
-  try {
-    const result = spawnSync('git', ['remote', 'get-url', 'origin'], {
-      cwd: root,
-      encoding: 'utf8',
-      timeout: 5000,
-    });
-    if (result.status !== 0) return { repo: null, source: null };
-    const repo = parseGithubRepo(result.stdout?.trim() || '');
-    return { repo, source: repo ? 'origin' : null };
-  } catch {
-    return { repo: null, source: null };
-  }
+  const result = spawnSync('git', ['remote', 'get-url', 'origin'], {
+    cwd: root,
+    encoding: 'utf8',
+    timeout: 5000,
+  });
+  if (result.status !== 0) return { repo: null, source: null };
+  const repo = parseGithubRepo(result.stdout?.trim() || '');
+  return { repo, source: repo ? 'origin' : null };
 }

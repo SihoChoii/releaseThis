@@ -134,9 +134,23 @@ function output(app, width, height, c) {
   let top = [];
   if (app.runner.jobs.length && height >= 16) {
     const runner = app.runner;
-    const title = runner.running ? runner.cancelled ? 'Stopping task…' : app.runTitle || 'Task running' : runner.result === 'done' ? 'Task completed' : runner.result === 'paused' ? 'Task paused' : runner.result === 'failed' ? 'Task failed' : 'Task cancelled';
+    const titles = {
+      running: runner.cancelled ? 'Stopping task…' : app.runTitle || 'Task running',
+      done: 'Task completed',
+      paused: 'Task paused',
+      failed: 'Task failed',
+      cancelled: 'Task cancelled',
+    };
+    const hints = {
+      paused: 'T continue plan   E save log',
+      failed: 'T resume remaining stages   E save log',
+      cancelled: 'T resume remaining stages   E save log',
+      done: 'A inspect artifacts   P publish   E save log',
+    };
+    const state = runner.running ? 'running' : runner.result;
+    const title = titles[state] || titles.cancelled;
     top = [' ' + c(title, runner.result === 'failed' ? 'red' : runner.result === 'done' ? 'mint' : 'ice', true)];
-    if (!runner.running) top.push(' ' + c(runner.result === 'paused' ? 'T continue plan   E save log' : ['failed', 'cancelled'].includes(runner.result) ? 'T resume remaining stages   E save log' : 'A inspect artifacts   P publish   E save log', 'muted'));
+    if (!runner.running) top.push(' ' + c(hints[state] || hints.done, 'muted'));
     top.push(' ' + c('─'.repeat(width - 4), 'line'));
   }
   const logs = logLines(app, width - 2, height - 2 - top.length, c);

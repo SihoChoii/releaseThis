@@ -52,7 +52,7 @@ export function takeStatusLine(line) {
   if ('progress' in fields) {
     if (!/^(?:0|1|0?\.\d+|\d+\.\d+)$/.test(fields.progress)) return { malformed: true };
     const progress = Number(fields.progress);
-    if (!Number.isFinite(progress) || progress < 0 || progress > 1) return { malformed: true };
+    if (progress > 1) return { malformed: true };
     patch.progress = progress;
   }
   for (const key of ['completed', 'total']) {
